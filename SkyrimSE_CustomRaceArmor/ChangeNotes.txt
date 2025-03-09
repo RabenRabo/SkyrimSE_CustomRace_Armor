@@ -1,0 +1,5 @@
+﻿Version 1.0.1
+Added license information
+
+Version 1.0.0
+Intial version

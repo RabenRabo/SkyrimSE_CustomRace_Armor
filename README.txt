@@ -5,6 +5,8 @@ The GeneralSettings.json file contains a list of EditorIDs of Armor that will be
 The RaceSettings folder contains JSON files with patching settings for specific races.
 NOTE: this software only creates an ESP plugin file, NOT actual meshes (NIF files) which are referenced in said ESP.
 
+SOURCE
+Sources for this software are published at https://github.com/RabenRabo/SkyrimSE_CustomRace_Armor
 
 LICENSES
 
