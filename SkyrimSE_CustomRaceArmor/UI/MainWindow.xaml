@@ -1,0 +1,124 @@
+﻿<Window x:Class="SSE.CRA.UI.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:local="clr-namespace:SSE.CRA.UI"
+        xmlns:vm="clr-namespace:SSE.CRA.VM"
+        xmlns:clr="clr-namespace:System;assembly=mscorlib"
+        mc:Ignorable="d"
+        Title="Skyrim AE Custom Race Armor Patcher" Height="700" Width="400" ResizeMode="CanMinimize">
+    <Window.DataContext>
+        <vm:MainViewModel/>
+    </Window.DataContext>
+    <Window.Resources>
+        <local:BoolInverterConverter x:Key="BoolInverterConverter" />
+        <local:ValidityBrushConverter x:Key="ValidityBrushConverter" />
+        <local:BoolVisibilityConverter x:Key="BoolVisibilityConverter" />
+        <local:BoolVisibilityConverter x:Key="InvertedBoolVisibilityConverter" FalseVisibility="Visible" TrueVisibility="Collapsed" />
+        <clr:String x:Key="ExtAATip">Extends existing ArmorAddons for the specified body part with the custom race. Custom race will use the already existing model.</clr:String>
+        <clr:String x:Key="NewAATip">Creates a new ArmorAddons for the specified body part for the custom race. The new AA will use a new model path based on the first matching regex replacer below.</clr:String>
+    </Window.Resources>
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+        </Grid.RowDefinitions>
+        <GroupBox Grid.Row="0" Header="Select races to process">
+            <ListView Height="75" SelectionMode="Single" ItemsSource="{Binding Path=Races}">
+                <ListView.ItemTemplate>
+                    <DataTemplate>
+                        <DockPanel LastChildFill="True">
+                            <CheckBox IsChecked="{Binding Path=ToBeProcessed}"/>
+                            <TextBlock Width="10"/>
+                            <TextBlock Text="{Binding Path=Name}"/>
+                        </DockPanel>
+                    </DataTemplate>
+                </ListView.ItemTemplate>
+            </ListView>
+        </GroupBox>
+        <Grid Grid.Row="1">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/>
+                <RowDefinition Height="*"/>
+            </Grid.RowDefinitions>
+            <ToggleButton HorizontalAlignment="Left" VerticalAlignment="Top" Width="20" Content="{Binding Path=RaceConfigurationToggleButtonContent}" IsChecked="{Binding Path=ShowRaceConfiguration}"/>
+            <Label Grid.Column="1" Visibility="{Binding Path=ShowRaceConfiguration, Converter={StaticResource ResourceKey=InvertedBoolVisibilityConverter}}">Configure race settings</Label>
+            <GroupBox Grid.Column="1" Grid.RowSpan="2" Visibility="{Binding Path=ShowRaceConfiguration, Converter={StaticResource ResourceKey=BoolVisibilityConverter}}" Header="Configure race settings" IsEnabled="{Binding Path=Running, Converter={StaticResource ResourceKey=BoolInverterConverter}}">
+                <StackPanel Orientation="Vertical">
+                    <Label>select race to configure</Label>
+                    <Grid>
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*"/>
+                            <ColumnDefinition Width="Auto"/>
+                            <ColumnDefinition Width="Auto"/>
+                        </Grid.ColumnDefinitions>
+                        <ComboBox ItemsSource="{Binding Path=Races}" SelectedValue="{Binding Path=SelectedRace}"/>
+                        <Button Grid.Column="1" Command="{Binding Path=SaveRaceSettingsCommand}">Save</Button>
+                        <Button Grid.Column="2" Command="{Binding Path=LoadRaceSettingsCommand}" Visibility="Collapsed">Load</Button>
+                    </Grid>
+                    <UniformGrid Columns="2">
+                        <Label ToolTip="{StaticResource ResourceKey=ExtAATip}">extend existing ArmorAddon</Label>
+                        <Label ToolTip="{StaticResource ResourceKey=NewAATip}" HorizontalAlignment="Right">add new ArmorAddon</Label>
+                    </UniformGrid>
+                    <UniformGrid Columns="3" Rows="4">
+                        <RadioButton ToolTip="{StaticResource ResourceKey=ExtAATip}" GroupName="Head" IsChecked="{Binding Path=SelectedRace.HasCustomHeadAA, Converter={StaticResource ResourceKey=BoolInverterConverter}}"/>
+                        <Label HorizontalAlignment="Center">head</Label>
+                        <RadioButton ToolTip="{StaticResource ResourceKey=NewAATip}" HorizontalAlignment="Right" GroupName="Head" IsChecked="{Binding Path=SelectedRace.HasCustomHeadAA}"/>
+                        <RadioButton ToolTip="{StaticResource ResourceKey=ExtAATip}" GroupName="Body" IsChecked="{Binding Path=SelectedRace.HasCustomBodyAA, Converter={StaticResource ResourceKey=BoolInverterConverter}}"/>
+                        <Label HorizontalAlignment="Center">body</Label>
+                        <RadioButton ToolTip="{StaticResource ResourceKey=NewAATip}" HorizontalAlignment="Right" GroupName="Body" IsChecked="{Binding Path=SelectedRace.HasCustomBodyAA}"/>
+                        <RadioButton ToolTip="{StaticResource ResourceKey=ExtAATip}" GroupName="Hands" IsChecked="{Binding Path=SelectedRace.HasCustomHandsAA, Converter={StaticResource ResourceKey=BoolInverterConverter}}"/>
+                        <Label HorizontalAlignment="Center">hands</Label>
+                        <RadioButton ToolTip="{StaticResource ResourceKey=NewAATip}" HorizontalAlignment="Right" GroupName="Hands" IsChecked="{Binding Path=SelectedRace.HasCustomHandsAA}"/>
+                        <RadioButton ToolTip="{StaticResource ResourceKey=ExtAATip}" GroupName="Feet" IsChecked="{Binding Path=SelectedRace.HasCustomFeetAA, Converter={StaticResource ResourceKey=BoolInverterConverter}}"/>
+                        <Label HorizontalAlignment="Center">feet</Label>
+                        <RadioButton ToolTip="{StaticResource ResourceKey=NewAATip}" HorizontalAlignment="Right" GroupName="Feet"  IsChecked="{Binding Path=SelectedRace.HasCustomFeetAA}"/>
+                    </UniformGrid>
+                    <Label>select target sex(es)</Label>
+                    <UniformGrid Columns="2">
+                        <CheckBox IsChecked="{Binding Path=SelectedRace.ProcessMale}">Male</CheckBox>
+                        <CheckBox IsChecked="{Binding Path=SelectedRace.ProcessFemale}">Female</CheckBox>
+                    </UniformGrid>
+                    <Label>regex replacers to change model paths</Label>
+                    <DockPanel LastChildFill="True">
+                        <StackPanel DockPanel.Dock="Left" Orientation="Vertical">
+                            <Button Width="20" Command="{Binding Path=SelectedRace.MoveReplacerRegexUpCommand}">^</Button>
+                            <Button Width="20" Command="{Binding Path=SelectedRace.MoveReplacerRegexDownCommand}">v</Button>
+                        </StackPanel>
+                        <DataGrid AutoGenerateColumns="False" Height="100" ItemsSource="{Binding Path=SelectedRace.ReplacerRegexes}" SelectedValue="{Binding Path=SelectedRace.SelectedReplacerRegex}" CanUserSortColumns="False" CanUserReorderColumns="False" CanUserResizeRows="False" SelectionMode="Single" LostFocus="DataGrid_LostFocus">
+                            <DataGrid.Columns>
+                                <DataGridTextColumn Header="Replace" Binding="{Binding Path=SearchRegex}" Width="*" />
+                                <DataGridTextColumn Header="With" Binding="{Binding Path=ReplaceString}" Width="*" />
+                            </DataGrid.Columns>
+                        </DataGrid>
+                    </DockPanel>
+                </StackPanel>
+            </GroupBox>
+        </Grid>
+        <GroupBox Grid.Row="2" Header="Output" IsEnabled="{Binding Path=Running, Converter={StaticResource ResourceKey=BoolInverterConverter}}">
+            <StackPanel Orientation="Vertical">
+                <DockPanel LastChildFill="True">
+                    <Label DockPanel.Dock="Left">Plugin Name</Label>
+                    <Border BorderBrush="{Binding Path=OutputNameValid, Converter={StaticResource ResourceKey=ValidityBrushConverter}}" BorderThickness="1">
+                        <TextBox Text="{Binding Path=OutputName}" Height="25"/>
+                    </Border>
+                </DockPanel>
+                <Button Height="25" Command="{Binding Path=PatchCommand}">Patch</Button>
+            </StackPanel>
+        </GroupBox>
+        <DockPanel Grid.Row="3" LastChildFill="True">
+            <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal" IsEnabled="{Binding Path=Running, Converter={StaticResource ResourceKey=BoolInverterConverter}}">
+                <ComboBox ItemsSource="{Binding Path=ConsoleLevelItems}" SelectedValue="{Binding Path=SelectedConsoleLevel}" />
+                <Button Command="{Binding Path=SaveConsoleToFileCommand}">Save to File</Button>
+            </StackPanel>
+            <TextBox IsReadOnly="True" x:Name="txtConsole" VerticalScrollBarVisibility="Visible"/>
+        </DockPanel>
+    </Grid>
+</Window>

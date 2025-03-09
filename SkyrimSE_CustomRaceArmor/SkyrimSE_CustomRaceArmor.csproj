@@ -1,0 +1,49 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWPF>true</UseWPF>
+    <RootNamespace>SSE.CRA</RootNamespace>
+    <Authors>RabenRabo</Authors>
+    <Company />
+    <Product>Skyrim SE Custom Race Armor</Product>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Remove="README.txt" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Include="..\README.txt" Link="README.txt">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Mutagen.Bethesda.FormKeys.SkyrimSE" Version="3.4.0" />
+    <PackageReference Include="Mutagen.Bethesda.Skyrim" Version="0.48.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\SkyrimSE_CustomRaceArmor_Lib\SkyrimSE_CustomRaceArmor_Lib.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <None Update="GeneralSettings.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Update="LICENSE.txt">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Update="Licenses\Mutagen_LICENSE.txt">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Update="RaceSettings\aaDrai.json">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+  </ItemGroup>
+
+</Project>
