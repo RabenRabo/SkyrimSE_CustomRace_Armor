@@ -1,11 +1,12 @@
 ﻿using Microsoft.Win32;
-using Mutagen.Bethesda.Plugins;
 using Mutagen.Bethesda.Skyrim;
 using SSE.CRA.AL;
 using SSE.CRA.BL;
+using SSE.CRA.UI;
 using System.IO;
 using System.Text;
 using System.Text.RegularExpressions;
+using System.Windows;
 
 namespace SSE.CRA.VM
 {
@@ -21,9 +22,13 @@ namespace SSE.CRA.VM
         private bool _showRaceConfiguration = false;
         private readonly IEnumerable<RaceViewModel> _races;
         private RaceViewModel? _selectedRace;
-
         private string[] _nonWearableArmorRegexes = [@"^(?:dlc\d+\\)?actors\\", @"^(?:dlc\d+\\)?effects\\"];
         private string _outputName = "CustomRacesArmor";
+        private bool _flagESL = true;
+        private int _maxNewRecordsInt;
+        private string _maxNewRecords = "";
+        private int _maxPluginMastersInt;
+        private string _maxPluginMasters = "";
         private StringBuilder _consoleText = new StringBuilder();
         private ProgressInfoTypes _selectedConsoleLevel = ProgressInfoTypes.Info;
         private readonly GeneralSettings _generalSettings;
@@ -77,7 +82,65 @@ namespace SSE.CRA.VM
                 }
             }
         }
-        public bool OutputNameValid => !string.IsNullOrEmpty(_outputName);
+        public bool OutputNameValid => !string.IsNullOrEmpty(_outputName) && int.TryParse(MaxNewRecords, out int mnr);
+        public bool FlagESL
+        {
+            get => _flagESL;
+            set
+            {
+                if (_flagESL != value)
+                {
+                    _flagESL = value;
+                    RaisePropertyChanged();
+                }
+            }
+        }
+        public string MaxNewRecords
+        {
+            get => _maxNewRecords;
+            set
+            {
+                if (_maxNewRecords != value)
+                {
+                    _maxNewRecords = value;
+                    if (int.TryParse(value, out int tmp))
+                    {
+                        _maxNewRecordsInt = tmp;
+                    }
+                    else
+                    {
+                        _maxNewRecordsInt = -1;
+                    }
+                    UpdateEnabled();
+                    RaisePropertyChanged(nameof(MaxNewRecordsValid));
+                    RaisePropertyChanged();
+                }
+            }
+        }
+        public bool MaxNewRecordsValid => _maxNewRecordsInt > 0 && _maxNewRecordsInt <= 2048;
+        public string MaxPluginMasters
+        {
+            get => _maxPluginMasters;
+            set
+            {
+                if (_maxPluginMasters != value)
+                {
+                    _maxPluginMasters = value;
+                    if (int.TryParse(value, out int tmp))
+                    {
+                        _maxPluginMastersInt = tmp;
+                    }
+                    else
+                    {
+                        _maxPluginMastersInt = -1;
+                    }
+                    UpdateEnabled();
+                    RaisePropertyChanged(nameof(MaxPluginMastersValid));
+                    RaisePropertyChanged();
+                }
+            }
+        }
+        public bool MaxPluginMastersValid => _maxPluginMastersInt > 0 && _maxPluginMastersInt <= 254;
         public IEnumerable<ProgressInfoTypes> ConsoleLevelItems => Enum.GetValues(typeof(ProgressInfoTypes)).Cast<ProgressInfoTypes>();
         public ProgressInfoTypes SelectedConsoleLevel
         {
@@ -110,7 +173,7 @@ namespace SSE.CRA.VM
             using (var modding = new Modding())
             {
                 _gameDataPath = modding.GetGameDataPath();
-                _races = modding.GetRaces().Select(pair => new RaceViewModel(pair.Key.EditorID!, pair.Value.EditorID!)).ToArray();
+                _races = modding.GetRaces().Select(pair => new RaceViewModel(pair.Key, pair.Value)).ToArray();
             }
             foreach (var race in _races)
             {
@@ -118,6 +181,8 @@ namespace SSE.CRA.VM
                 race.PropertyChanged += Race_PropertyChanged;
                 race.UpdateEnabledRequested += Race_UpdateEnabledRequested;
             }
+            MaxPluginMasters = "200";
+            MaxNewRecords = "2000";
         }
         #endregion
 
@@ -203,14 +268,138 @@ namespace SSE.CRA.VM
         }
         private bool CanPatch()
         {
-            return OutputNameValid && _races.Any(r => r.ToBeProcessed);
+            return OutputNameValid && MaxNewRecordsValid && MaxPluginMastersValid && _races.Any(r => r.ToBeProcessed);
         }
+        //private async Task Patch()
+        //{
+        //    _consoleText.Clear();
+        //    ConsoleTextCleared?.Invoke(this, EventArgs.Empty);
+        //    string[] filesToBeDeleted;
+        //    try
+        //    {
+        //        var modFileRegex = new Regex(OutputName + @"\d*\.esp", RegexOptions.IgnoreCase);
+        //        filesToBeDeleted = Directory.EnumerateFiles(_gameDataPath).Where(f => modFileRegex.IsMatch(f)).Select(f => Path.GetFileName(f)).ToArray();
+        //    }
+        //    catch (Exception ex)
+        //    {
+        //        ConsoleTextChanged?.Invoke($"ERROR: while finding files to delete: {ex.Message}", true);
+        //        return;
+        //    }
+        //    if (filesToBeDeleted.Length > 1)
+        //    {
+        //        var dlg = new CheckListDialog()
+        //        {
+        //            Title = "Select files to delete",
+        //            ConfirmText = "Delete",
+        //            ItemsSource = filesToBeDeleted,
+        //            ItemPreselector = f => true
+        //        };
+        //        if (dlg.ShowDialog() != true) return;
+        //        filesToBeDeleted = dlg.SelectedItems.Cast<string>().ToArray();
+        //    }
+        //    else if (filesToBeDeleted.Length == 1)
+        //    {
+        //        if (MessageBox.Show($"The following file will be deleted: {filesToBeDeleted.First()}", "Confirm Deletion", MessageBoxButton.OKCancel, MessageBoxImage.Question) == MessageBoxResult.Cancel) return;
+        //    }
+        //    IProgress<ProgressInfo> progress = new Progress<ProgressInfo>();
+        //    ((Progress<ProgressInfo>)progress).ProgressChanged += Progress_ProgressChanged;
+        //    _running = true;
+        //    RaisePropertyChanged(nameof(Running));
+        //    await Task.Run(() =>
+        //    {
+        //        Modding? modding = null;
+        //        try
+        //        {
+        //            // delete old ESPs
+        //            if (filesToBeDeleted.Length > 0)
+        //            {
+        //                progress.Report(new ProgressInfo(ProgressInfoTypes.Trace, "deleting old modfile(s)"));
+        //                foreach (var file in filesToBeDeleted)
+        //                {
+        //                    progress.Report(new ProgressInfo(ProgressInfoTypes.Info, $"deleting old modfile {file}"));
+        //                    File.Delete(Path.Combine(_gameDataPath, file));
+        //                }
+        //            }
+        //            modding = new Modding();
+        //            progress.Report(new ProgressInfo(ProgressInfoTypes.Trace, "removing ArmorRace from race"));
+        //            var processingInfo = new Modding.ArmorProcessingInfo(
+        //                _gameDataPath,
+        //                OutputName,
+        //                FlagESL,
+        //                _maxPluginMastersInt,
+        //                _maxNewRecordsInt,
+        //                _generalSettings,
+        //                _nonWearableArmorRegexes.Select(nar => new Regex(nar, RegexOptions.IgnoreCase)).ToArray()
+        //            );
+        //            var races = _races.Where(r => r.ToBeProcessed).Select(r => new KeyValuePair<RaceViewModel, Modding.RaceGetterPair>(r, modding.RemoveArmorRace(processingInfo, r.EditorID, r.VampEditorID, progress))).ToArray();
+        //            processingInfo.Races = races.Select(pair =>
+        //                new Modding.ArmorRaceProcessingInfo(
+        //                    pair.Value,
+        //                    pair.Key.HasCustomHeadAA,
+        //                    pair.Key.HasCustomBodyAA,
+        //                    pair.Key.HasCustomHandsAA,
+        //                    pair.Key.HasCustomFeetAA,
+        //                    pair.Key.ProcessMale,
+        //                    pair.Key.ProcessFemale,
+        //                    pair.Key.ReplacerRegexes.Select(vm => new KeyValuePair<Regex, string>(new Regex(vm.SearchRegex, RegexOptions.IgnoreCase), vm.ReplaceString)).ToArray())).ToArray();
+        //            progress.Report(new ProgressInfo(ProgressInfoTypes.Debug, "removed ArmorRace from race"));
+        //            progress.Report(new ProgressInfo(ProgressInfoTypes.Trace, "updating race skin armor"));
+        //            int countSkinAAs = modding.SetArmorRaceOfSkin(processingInfo, progress);
+        //            progress.Report(new ProgressInfo(ProgressInfoTypes.Debug, $"updated race skin armor ({countSkinAAs} ArmorAddons updated)"));
+        //            progress.Report(new ProgressInfo(ProgressInfoTypes.Trace, "processing armor"));
+        //            var result = modding.ProcessArmor(processingInfo, progress, null);
+        //            progress.Report(new ProgressInfo(ProgressInfoTypes.Info, $"processed {result.ArmorCount} armor (overrode {result.OverwriteAAs} ArmorAddons, created {result.NewAAs} new ones, missing {result.MissingPaths} models)"));
+        //            progress.Report(new ProgressInfo(ProgressInfoTypes.Info, $"created {result.CreatedFiles.Count()} files"));
+        //            foreach (var file in result.CreatedFiles)
+        //            {
+        //                progress.Report(new ProgressInfo(ProgressInfoTypes.Info, $"-> {file}"));
+        //            }
+        //        }
+        //        catch (Exception ex)
+        //        {
+        //            progress.Report(new ProgressInfo(ProgressInfoTypes.Error, $"patch process aborted: {ex}"));
+        //        }
+        //        finally
+        //        {
+        //            modding?.Dispose();
+        //        }
+        //    });
+        //    _running = false;
+        //    RaisePropertyChanged(nameof(Running));
+        //}
         private async Task Patch()
         {
-            IProgress<ProgressInfo> progress = new Progress<ProgressInfo>();
-            ((Progress<ProgressInfo>)progress).ProgressChanged += Progress_ProgressChanged;
             _consoleText.Clear();
             ConsoleTextCleared?.Invoke(this, EventArgs.Empty);
+            string[] filesToBeDeleted;
+            try
+            {
+                var modFileRegex = new Regex(OutputName + @"\d*\.esp", RegexOptions.IgnoreCase);
+                filesToBeDeleted = Directory.EnumerateFiles(_gameDataPath).Where(f => modFileRegex.IsMatch(f)).Select(f => Path.GetFileName(f)).ToArray();
+            }
+            catch (Exception ex)
+            {
+                ConsoleTextChanged?.Invoke($"ERROR: while finding files to delete: {ex.Message}", true);
+                return;
+            }
+            if (filesToBeDeleted.Length > 1)
+            {
+                var dlg = new CheckListDialog()
+                {
+                    Title = "Select files to delete",
+                    ConfirmText = "Delete",
+                    ItemsSource = filesToBeDeleted,
+                    ItemPreselector = f => true
+                };
+                if (dlg.ShowDialog() != true) return;
+                filesToBeDeleted = dlg.SelectedItems.Cast<string>().ToArray();
+            }
+            else if (filesToBeDeleted.Length == 1)
+            {
+                if (MessageBox.Show($"The following file will be deleted: {filesToBeDeleted.First()}", "Confirm Deletion", MessageBoxButton.OKCancel, MessageBoxImage.Question) == MessageBoxResult.Cancel) return;
+            }
+            IProgress<ProgressInfo> progress = new Progress<ProgressInfo>();
+            ((Progress<ProgressInfo>)progress).ProgressChanged += Progress_ProgressChanged;
             _running = true;
             RaisePropertyChanged(nameof(Running));
             await Task.Run(() =>
@@ -218,48 +407,58 @@ namespace SSE.CRA.VM
                 Modding? modding = null;
                 try
                 {
-                    var modKey = new ModKey(OutputName, ModType.Plugin);
-                    if (Modding.ExistsMod(_gameDataPath, modKey))
+                    // delete old ESPs
+                    if (filesToBeDeleted.Length > 0)
                     {
-                        progress.Report(new ProgressInfo(ProgressInfoTypes.Info, "deleting old modfile"));
-                        Modding.DeleteMod(_gameDataPath, modKey);
+                        progress.Report(new ProgressInfo(ProgressInfoTypes.Trace, "deleting old modfile(s)"));
+                        foreach (var file in filesToBeDeleted)
+                        {
+                            progress.Report(new ProgressInfo(ProgressInfoTypes.Info, $"deleting old modfile {file}"));
+                            File.Delete(Path.Combine(_gameDataPath, file));
+                        }
                     }
                     modding = new Modding();
-                    progress.Report(new ProgressInfo(ProgressInfoTypes.Trace, "creating mod object"));
-                    SkyrimMod mod = modding.CreateMod(modKey);
-                    progress.Report(new ProgressInfo(ProgressInfoTypes.Debug, "created mod object"));
-                    progress.Report(new ProgressInfo(ProgressInfoTypes.Trace, "removing ArmorRace from race"));
-                    var races = _races.Where(r => r.ToBeProcessed).Select(r => new KeyValuePair<RaceViewModel, Modding.RacePair>(r, modding.RemoveArmorRace(mod, r.EditorID, r.VampEditorID))).ToArray();
-                    var racesInfo = races.Select(pair =>
-                        new Modding.ArmorRaceProcessingInfo(
-                            pair.Value,
-                            pair.Key.HasCustomHeadAA,
-                            pair.Key.HasCustomBodyAA,
-                            pair.Key.HasCustomHandsAA,
-                            pair.Key.HasCustomFeetAA,
-                            pair.Key.ProcessMale,
-                            pair.Key.ProcessFemale,
-                            pair.Key.ReplacerRegexes.Select(vm => new KeyValuePair<Regex, string>(new Regex(vm.SearchRegex, RegexOptions.IgnoreCase), vm.ReplaceString)).ToArray())).ToArray();
-                    progress.Report(new ProgressInfo(ProgressInfoTypes.Debug, "removed ArmorRace from race"));
                     var processingInfo = new Modding.ArmorProcessingInfo(
-                        mod,
-                        racesInfo,
+                        _gameDataPath,
+                        OutputName,
+                        FlagESL,
+                        _maxPluginMastersInt,
+                        _maxNewRecordsInt,
                         _generalSettings,
                         _nonWearableArmorRegexes.Select(nar => new Regex(nar, RegexOptions.IgnoreCase)).ToArray()
-                    );
-                    progress.Report(new ProgressInfo(ProgressInfoTypes.Trace, "updating race skin armor"));
-                    int countSkinAAs = modding.SetArmorRaceOfSkin(processingInfo);
-                    progress.Report(new ProgressInfo(ProgressInfoTypes.Debug, $"updated race skin armor ({countSkinAAs} ArmorAddons updated)"));
+                    )
+                    {
+                        Progress = progress
+                    };
+                    processingInfo.Races = _races.Where(r => r.ToBeProcessed).Select(r =>
+                        new Modding.ArmorRaceProcessingInfo(
+                            Modding.RaceIDPair.FromEditorIDs(r.EditorID, r.VampEditorID),
+                            r.HasCustomHeadAA,
+                            r.HasCustomBodyAA,
+                            r.HasCustomHandsAA,
+                            r.HasCustomFeetAA,
+                            r.ProcessMale,
+                            r.ProcessFemale,
+                            r.ReplacerRegexes.Select(rr => new ModelPathRegexInfo(new Regex(rr.SearchRegex, RegexOptions.IgnoreCase), rr.ReplaceString)).ToArray()
+                        )).ToArray();
+                    progress.Report(new ProgressInfo(ProgressInfoTypes.Trace, "processing race(s)"));
+                    modding.ProcessRaces(processingInfo);
+                    progress.Report(new ProgressInfo(ProgressInfoTypes.Debug, "processed race(s)"));
+                    progress.Report(new ProgressInfo(ProgressInfoTypes.Trace, "pre processing Armor/ArmorAddons"));
+                    var preProcessResult = modding.PreProcessArmor(processingInfo);
+                    progress.Report(new ProgressInfo(ProgressInfoTypes.Debug, "pre processed Armor/ArmorAddons"));
                     progress.Report(new ProgressInfo(ProgressInfoTypes.Trace, "processing armor"));
-                    var result = modding.ProcessArmor(processingInfo, progress, null);
-                    progress.Report(new ProgressInfo(ProgressInfoTypes.Info, $"processed {result.ArmorCount} armor (overrode {result.OverwriteAAs} ArmorAddons, created {result.NewAAs} new ones, missing {result.MissingPaths} models)"));
-                    progress.Report(new ProgressInfo(ProgressInfoTypes.Trace, "writing mod to disk"));
-                    modding.WriteMod(processingInfo);
-                    progress.Report(new ProgressInfo(ProgressInfoTypes.Info, $"created {processingInfo.Target.ModKey.FileName}"));
+                    var result = modding.ProcessArmor(processingInfo, preProcessResult);
+                    progress.Report(new ProgressInfo(ProgressInfoTypes.Info, $"processed {result.ArmorCount} armor (overrode {result.OverriddenAACount} ArmorAddons, created {result.NewAACount} new ones, missing {result.MissingPathCount} models)"));
+                    progress.Report(new ProgressInfo(ProgressInfoTypes.Info, $"created {result.CreatedFiles.Count()} files"));
+                    foreach (var file in result.CreatedFiles)
+                    {
+                        progress.Report(new ProgressInfo(ProgressInfoTypes.Info, $"-> {file}"));
+                    }
                 }
                 catch (Exception ex)
                 {
-                    progress.Report(new ProgressInfo(ProgressInfoTypes.Error, $"patch process aborted: {ex.Message}"));
+                    progress.Report(new ProgressInfo(ProgressInfoTypes.Error, $"patch process aborted: {ex}"));
                 }
                 finally
                 {

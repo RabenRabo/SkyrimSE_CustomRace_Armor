@@ -10,8 +10,8 @@
     <Authors>RabenRabo</Authors>
     <Company />
     <Product>Skyrim SE Custom Race Armor</Product>
-    <AssemblyVersion>1.0.0.0</AssemblyVersion>
-    <FileVersion>1.0.1.0</FileVersion>
+    <AssemblyVersion>1.1.0.0</AssemblyVersion>
+    <FileVersion>1.1.0.0</FileVersion>
   </PropertyGroup>
 
   <ItemGroup>
@@ -32,7 +32,7 @@
 
   <ItemGroup>
     <PackageReference Include="Mutagen.Bethesda.FormKeys.SkyrimSE" Version="3.4.0" />
-    <PackageReference Include="Mutagen.Bethesda.Skyrim" Version="0.48.1" />
+    <PackageReference Include="Mutagen.Bethesda.Skyrim" Version="0.49.0" />
   </ItemGroup>
 
   <ItemGroup>

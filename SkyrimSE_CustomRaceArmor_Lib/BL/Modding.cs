@@ -4,7 +4,6 @@ using Mutagen.Bethesda.Environments;
 using Mutagen.Bethesda.FormKeys.SkyrimSE;
 using Mutagen.Bethesda.Plugins;
 using Mutagen.Bethesda.Skyrim;
-using Noggog;
 using System.Text.RegularExpressions;
 
 namespace SSE.CRA.BL
@@ -24,7 +23,7 @@ namespace SSE.CRA.BL
         /// Returns a list of all non-vanilla races (along with their vampire equivalent)
         /// </summary>
         /// <returns></returns>
-        public IEnumerable<KeyValuePair<IRaceGetter, IRaceGetter>> GetRaces()
+        public IEnumerable<KeyValuePair<string, string>> GetRaces()
         {
             Dictionary<string, KeyValuePair<IRaceGetter?, IRaceGetter?>> res = [];
             foreach (var raceGetter in _environment.LoadOrder.PriorityOrder.Race().WinningOverrides())
@@ -50,114 +49,125 @@ namespace SSE.CRA.BL
                     res[editorID] = new(isVamp ? pair.Key : raceGetter, isVamp ? raceGetter : pair.Value);
                 }
             }
-            return res.Values.Where(pair => pair.Key is not null && pair.Value is not null).Cast<KeyValuePair<IRaceGetter, IRaceGetter>>().ToArray();
+            return res.Values.Where(pair => pair.Key is not null && pair.Value is not null).Select(pair => new KeyValuePair<string, string>(pair.Key!.EditorID!, pair.Value!.EditorID!)).ToArray();
         }
-        public IRaceGetter GetRace(string editorID)
+        /// <summary>
+        /// Removes ArmorRace from race and raceVampire, and updates Race and AdditionalRaces of naked skin
+        /// </summary>
+        /// <param name="processingInfo"></param>
+        /// <param name="target"></param>
+        public void ProcessRaces(ArmorProcessingInfo processingInfo)
         {
-            return _environment.LoadOrder.PriorityOrder.Race().WinningOverrides().First(r => r.EditorID == editorID);
-        }
-        public SkyrimMod CreateMod(ModKey modKey)
-        {
-            return new SkyrimMod(modKey, SkyrimRelease.SkyrimSE);
-        }
-        public RacePair RemoveArmorRace(SkyrimMod target, string editorID, string vampEditorID)
-        {
-            IRaceGetter race = GetRace(editorID);
-            IRaceGetter vamp = GetRace(vampEditorID);
-            Race ovRace = target.Races.GetOrAddAsOverride(race);
-            ovRace.ArmorRace.Clear();
-            Race ovVamp = target.Races.GetOrAddAsOverride(vamp);
-            ovVamp.ArmorRace.Clear();
-            return new(ovRace, ovVamp);
-        }
-        public int SetArmorRaceOfSkin(ArmorProcessingInfo processingInfo)
-        {
-            int count = 0;
+            var mod = processingInfo.GetMod();
             foreach (var raceInfo in processingInfo.Races)
             {
-                IArmorGetter skinArmor = raceInfo.Race.MainRace.Skin.Resolve(_environment.LinkCache);
+                raceInfo.Race.Main.Getter = GetRace(raceInfo.Race.Main.EditorID);
+                raceInfo.Race.Vamp.Getter = GetRace(raceInfo.Race.Vamp.EditorID);
+                // set ArmorRace of race/vamp to None (as opposed to DefaultRace)
+                Race ovRace = mod.Races.GetOrAddAsOverride(raceInfo.Race.Main.Getter);
+                ovRace.ArmorRace.Clear();
+                Race ovVamp = mod.Races.GetOrAddAsOverride(raceInfo.Race.Vamp.Getter);
+                ovVamp.ArmorRace.Clear();
+                // change race of skin armor
+                IArmorGetter skinArmor = raceInfo.Race.Main.Getter.Skin.Resolve(_environment.LinkCache);
                 foreach (IArmorAddonGetter armature in skinArmor.Armature.Select(a => a.Resolve(_environment.LinkCache)))
                 {
                     if (CheckIfNakedSkinArmature(armature, raceInfo))
                     {
-                        ArmorAddon aa = processingInfo.Target.ArmorAddons.GetOrAddAsOverride(armature);
-                        aa.Race = raceInfo.Race.MainRace.ToNullableLink();
+                        ArmorAddon aa = mod.ArmorAddons.GetOrAddAsOverride(armature);
+                        aa.Race = raceInfo.Race.Main.Getter.ToNullableLink();
                         aa.AdditionalRaces.Clear();
-                        aa.AdditionalRaces.Add(raceInfo.Race.VampireRace);
-                        count++;
+                        aa.AdditionalRaces.Add(raceInfo.Race.Vamp.Key);
                     }
                 }
             }
-            return count;
         }
-        public ProcessedArmorResult ProcessArmor(ArmorProcessingInfo processingInfo, IProgress<ProgressInfo>? progress, CancellationToken? cancellationToken)
+        /// <summary>
+        /// Collects all Armor and ArmorAddons to be processed
+        /// </summary>
+        /// <returns></returns>
+        public PreProcessResult PreProcessArmor(ArmorProcessingInfo processingInfo)
         {
-            var overriddenArmorAddons = new Dictionary<FormKey, KeyValuePair<ArmorAddon, HashSet<FormKey>>>();
-            var newArmorAddons = new Dictionary<string, ArmorAddon>();
-            int armorCount = 0;
-            int armorAddonOWCount = 0;
-            int newArmorAddonCount = 0;
-            HashSet<string> missingPaths = [];
-            foreach (var armorGetter in _environment.LoadOrder.PriorityOrder.Armor().WinningOverrides())
+            var result = new PreProcessResult();
+            foreach (var armorGetter in _environment.LoadOrder.PriorityOrder.OnlyEnabled().Armor().WinningOverrides())
             {
-                if (cancellationToken.HasValue && cancellationToken.Value.IsCancellationRequested) break;
-                bool armorProcessed = false;
-                foreach (var raceInfo in processingInfo.Races)
+                if (processingInfo.IsCancellationRequested) break;
+                // check if should ignore based on EditorID of armor
+                if (processingInfo.GenSettings.IgnoreEditorIDs.Contains(armorGetter.EditorID!)) continue;
+                // check if armor is wearable or something weird instead
+                if (!CheckIfWearableArmor(armorGetter)) continue;
+                ArmorInfo? armorInfo = null;
+                foreach (var arm in armorGetter.Armature)
                 {
-                    if (_environment.LoadOrder.ContainsKey(armorGetter.FormKey.ModKey) && !processingInfo.GenSettings.IgnoreEditorIDs.Contains(armorGetter.EditorID!) && CheckIfWearableArmor(processingInfo, raceInfo, armorGetter))
+                    ArmorAddonInfo? armorAddonInfo = null;
+                    if (processingInfo.IsCancellationRequested) break;
+                    foreach (var raceInfo in processingInfo.Races)
                     {
-                        Armor? a = null;
-                        progress?.Report(new ProgressInfo(ProgressInfoTypes.Debug, "processing " + armorGetter.EditorID + " for " + raceInfo.Race.MainRace.EditorID));
-                        foreach (var arm in armorGetter.Armature)
+                        if (processingInfo.IsCancellationRequested) break;
+                        IArmorAddonGetter aa = arm.Resolve(_environment.LinkCache);
+                        // check if ArmorAddon is for DefaultRace or should skip this one
+                        if (aa.Race.FormKey != Skyrim.Race.DefaultRace.FormKey && !aa.AdditionalRaces.Any(ar => ar.FormKey == Skyrim.Race.DefaultRace.FormKey)) continue;
+
+                        // armor will be processed in some way
+                        if (armorInfo is null)
                         {
-                            IArmorAddonGetter aa = arm.Resolve(_environment.LinkCache);
-                            try
-                            {
-                                if (aa.Race.FormKey == Skyrim.Race.DefaultRace.FormKey || aa.AdditionalRaces.Any(ar => ar.FormKey == Skyrim.Race.DefaultRace.FormKey))
-                                {
-                                    if (cancellationToken.HasValue && cancellationToken.Value.IsCancellationRequested) break;
-                                    armorProcessed = true;
-                                    if (raceInfo.CheckIfNeedsCustomArmature(aa, out KeyValuePair<Regex, string>? maleRegex, out KeyValuePair<Regex, string>? femaleRegex))
-                                    {
-                                        if (a is null)
-                                        {
-                                            a = processingInfo.Target.Armors.GetOrAddAsOverride(armorGetter);
-                                        }
-                                        a.Armature.Add(CreateCustomArmature(processingInfo, raceInfo, missingPaths, newArmorAddons, a, aa, maleRegex, femaleRegex, progress));
-                                        newArmorAddonCount++;
-                                    }
-                                    else
-                                    {
-                                        ExtendExistingArmature(processingInfo, raceInfo, overriddenArmorAddons, aa);
-                                        armorAddonOWCount++;
-                                    }
-                                }
-                            }
-                            catch (Exception ex)
-                            {
-                                progress?.Report(new ProgressInfo(ProgressInfoTypes.Error, ex.Message));
-                            }
+                            armorInfo = new ArmorInfo(armorGetter.FormKey, armorGetter);
+                            result.Armors.Add(armorGetter.FormKey, armorInfo);
                         }
+                        // armor addon will be processed in some way
+                        if (armorAddonInfo is null && !result.ArmorAddons.TryGetValue(aa.FormKey, out armorAddonInfo))
+                        {
+                            armorAddonInfo = new ArmorAddonInfo(aa.FormKey, aa);
+                            result.ArmorAddons.Add(aa.FormKey, armorAddonInfo);
+                        }
+                        armorInfo.ArmorAddonKeys.Add(aa.FormKey);
+                        armorAddonInfo.Armors.Add(armorInfo);
+                        // check if ArmorAddon was already marked for processing by a previous Armor
+                        if (armorAddonInfo.Races.TryGetValue(raceInfo.Race.Main.Key, out ArmorAddonRaceInfo? aaRaceInfo)) continue;
+
+                        if (raceInfo.CheckIfNeedsCustomArmature(aa, out ModelPathRegexInfo? maleRegex, out ModelPathRegexInfo? femaleRegex))
+                        {
+                            aaRaceInfo = new ArmorAddonRaceNewInfo(armorAddonInfo, raceInfo.Race)
+                            {
+                                Male = maleRegex,
+                                Female = femaleRegex,
+                            };
+                        }
+                        else
+                        {
+                            aaRaceInfo = new ArmorAddonRaceExtInfo(armorAddonInfo, raceInfo.Race);
+                        }
+                        armorAddonInfo.Races.Add(raceInfo.Race.Main.Key, aaRaceInfo);
                     }
                 }
-                if (armorProcessed) armorCount++;
             }
-            return new(armorCount, armorAddonOWCount, newArmorAddonCount, missingPaths.Count);
+            return result;
+
         }
-        public static bool ExistsMod(string gameDataPath, ModKey modKey)
+        /// <summary>
+        /// Generates overrides/creates new records based on the PreProcessResult
+        /// </summary>
+        /// <param name="processingInfo"></param>
+        /// <param name="preProcessResult"></param>
+        public ProcessedArmorResult ProcessArmor(ArmorProcessingInfo processingInfo, PreProcessResult preProcessResult)
         {
-            return File.Exists(Path.Combine(gameDataPath, modKey.FileName.String));
-        }
-        public static void DeleteMod(string gameDataPath, ModKey modKey)
-        {
-            File.Delete(Path.Combine(gameDataPath, modKey.FileName.String));
-        }
-        public void WriteMod(ArmorProcessingInfo processingInfo)
-        {
-            processingInfo.Target.BeginWrite
-            .ToPath(Path.Combine(_environment.DataFolderPath.Path, processingInfo.Target.ModKey.FileName.String))
-            .WithDefaultLoadOrder()
-            .WriteAsync().Wait();
+            int armorCount = 0;
+            int overriddenAACount = 0;
+            int newAACount = 0;
+            foreach (var armor in preProcessResult.Armors.Values)
+            {
+                // check if armor already assigned to group, i.e. written to an output mod
+                if (armor.AssignedToGroup) continue;
+                var group = preProcessResult.CompileArmorGroupInfo(armor);
+                var output = processingInfo.GetMod(group);
+                group.WriteTo(processingInfo, output);
+                // update statistics
+                armorCount += group.Armor.Count();
+                overriddenAACount += group.OVerrideRecords;
+                newAACount += group.NewRecords;
+            }
+            processingInfo.WriteOutputMods();
+            return new(armorCount, overriddenAACount, newAACount, processingInfo.MissingModelPaths.Count, processingInfo.CreatedFiles);
         }
         public void Dispose()
         {
@@ -166,140 +176,141 @@ namespace SSE.CRA.BL
         #endregion
 
         #region methods (helping)
+        private IRaceGetter GetRace(string editorID)
+        {
+            return _environment.LoadOrder.PriorityOrder.Race().WinningOverrides().First(r => r.EditorID == editorID);
+        }
         private bool CheckIfNakedSkinArmature(IArmorAddonGetter aa, ArmorRaceProcessingInfo raceInfo)
         {
-            return aa.Race.FormKey == Skyrim.Race.DefaultRace.FormKey && aa.AdditionalRaces.Count == 2 && aa.AdditionalRaces.Contains(raceInfo.Race.MainRace.FormKey) && aa.AdditionalRaces.Contains(raceInfo.Race.VampireRace.FormKey);
+            return aa.Race.FormKey == Skyrim.Race.DefaultRace.FormKey && aa.AdditionalRaces.Count == 2 && aa.AdditionalRaces.Contains(raceInfo.Race.Main.Key) && aa.AdditionalRaces.Contains(raceInfo.Race.Vamp.Key);
         }
-        private bool CheckIfWearableArmor(ArmorProcessingInfo processingInfo, ArmorRaceProcessingInfo raceInfo, IArmorGetter armorGetter)
+        private bool CheckIfWearableArmor(IArmorGetter armorGetter)
         {
-            return armorGetter.EditorID is not null && !armorGetter.EditorID.StartsWith("SkinNaked") &&
-                !armorGetter.Armature.Any(aa => CheckNonWearableArmorAA(processingInfo, raceInfo, aa.Resolve(_environment.LinkCache))) && // check if any AAs marked as unwearable
-                (armorGetter.Race.FormKey == Skyrim.Race.DefaultRace.FormKey || armorGetter.Armature.Any(aa => CheckIfDefaultRaceArmorAddon(aa.Resolve(_environment.LinkCache)))); // check if can be worn by default race
-        }
-        private bool CheckNonWearableArmorAA(ArmorProcessingInfo processingInfo, ArmorRaceProcessingInfo raceInfo, IArmorAddonGetter aa)
-        {
-            if (aa.WorldModel is not null)
-            {
-                if (raceInfo.ProcessMale && aa.WorldModel.Male is not null)
-                {
-                    return processingInfo.NonWearableArmorRegexes.Any(nar => nar.IsMatch(aa.WorldModel.Male.File.GivenPath));
-                }
-                if (raceInfo.ProcessFemale && aa.WorldModel.Female is not null)
-                {
-                    return processingInfo.NonWearableArmorRegexes.Any(nar => nar.IsMatch(aa.WorldModel.Female.File.GivenPath));
-                }
-            }
-            return false;
-        }
-        private static bool CheckIfDefaultRaceArmorAddon(IArmorAddonGetter aa)
-        {
-            return (!aa.Race.IsNull && aa.Race.FormKey == Skyrim.Race.DefaultRace.FormKey) || aa.AdditionalRaces.Any(ar => ar.FormKey == Skyrim.Race.DefaultRace.FormKey);
-        }
-        private ArmorAddon CreateCustomArmature(ArmorProcessingInfo processingInfo, ArmorRaceProcessingInfo raceInfo, HashSet<string> missingPaths, Dictionary<string, ArmorAddon> newArmorAddons, Armor armor, IArmorAddonGetter armature, KeyValuePair<Regex, string>? maleRegex, KeyValuePair<Regex, string>? femaleRegex, IProgress<ProgressInfo>? progress)
-        {
-            progress?.Report(new ProgressInfo(ProgressInfoTypes.Trace, "CreateCustomArmature()"));
-            string newEditorID = raceInfo.Race.MainRace.EditorID + armature.EditorID;
-            // check if new AA not created yet
-            if (!newArmorAddons.TryGetValue(newEditorID, out var aa))
-            {
-                progress?.Report(new ProgressInfo(ProgressInfoTypes.Debug, "creating new custom armature"));
-                aa = processingInfo.Target.ArmorAddons.DuplicateInAsNewRecord(armature, newEditorID, null);
-                aa.EditorID = newEditorID;
-                newArmorAddons.Add(newEditorID, aa);
-                // check if should replace male model path
-                if (maleRegex is not null)
-                {
-                    string oldPath = aa.WorldModel!.Male!.File.GivenPath;
-                    string newPath = maleRegex.Value.Key.Replace(oldPath, maleRegex.Value.Value);
-                    if (!File.Exists(Path.Combine(_environment.DataFolderPath.Path, "meshes", newPath)) && missingPaths.Add(newPath))
-                    {
-                        progress?.Report(new ProgressInfo(ProgressInfoTypes.Warning, $"{newPath} ({armor.FormKey}, {armor.EditorID}) not found in meshes folder (prev. {oldPath})"));
-                    }
-                    aa.WorldModel!.Male!.File.GivenPath = newPath;
-                    if (aa.FirstPersonModel?.Male?.File.GivenPath == oldPath)
-                    {
-                        aa.FirstPersonModel!.Male!.File.GivenPath = newPath;
-                    }
-                }
-                // check if should replace female model path
-                if (femaleRegex is not null)
-                {
-                    string oldPath = aa.WorldModel!.Female!.File.GivenPath;
-                    string newPath = femaleRegex.Value.Key.Replace(oldPath, femaleRegex.Value.Value);
-                    if (!File.Exists(Path.Combine(_environment.DataFolderPath.Path, "meshes", newPath)) && missingPaths.Add(newPath))
-                    {
-                        progress?.Report(new ProgressInfo(ProgressInfoTypes.Warning, $"{newPath} ({armor.FormKey}, {armor.EditorID}) not found in meshes folder (prev. {oldPath})"));
-                    }
-                    aa.WorldModel!.Female!.File.GivenPath = newPath;
-                    if (aa.FirstPersonModel?.Female?.File.GivenPath == oldPath)
-                    {
-                        aa.FirstPersonModel!.Female!.File.GivenPath = newPath;
-                    }
-                }
-                // set Race and AdditionalRaces
-                aa.Race = raceInfo.Race.MainRace.ToNullableLink();
-                aa.AdditionalRaces.Clear();
-                aa.AdditionalRaces.Add(raceInfo.Race.VampireRace.ToNullableLink());
-            }
-            else
-            {
-                progress?.Report(new ProgressInfo(ProgressInfoTypes.Trace, "custom armature already exists"));
-            }
-            return aa;
-        }
-        private void ExtendExistingArmature(ArmorProcessingInfo processingInfo, ArmorRaceProcessingInfo raceInfo, Dictionary<FormKey, KeyValuePair<ArmorAddon, HashSet<FormKey>>> overriddenArmorAddons, IArmorAddonGetter armature)
-        {
-            // check if AA not overridden yet
-            if (!overriddenArmorAddons.TryGetValue(armature.FormKey, out var pair))
-            {
-                ArmorAddon aa = processingInfo.Target.ArmorAddons.GetOrAddAsOverride(armature);
-                pair = new KeyValuePair<ArmorAddon, HashSet<FormKey>>(aa, []);
-                overriddenArmorAddons.Add(armature.FormKey, pair);
-            }
-            // prevent adding race twice to AA (if used by multiple armors)
-            if (pair.Value.Add(raceInfo.Race.MainRace.FormKey))
-            {
-                pair.Key.AdditionalRaces.Add(raceInfo.Race.MainRace);
-                pair.Key.AdditionalRaces.Add(raceInfo.Race.VampireRace);
-            }
+            return armorGetter.EditorID is not null && !armorGetter.EditorID.StartsWith("SkinNaked");
         }
         #endregion
 
         public class ArmorProcessingInfo
         {
-            #region properties
-            public readonly SkyrimMod Target;
-            public readonly IEnumerable<ArmorRaceProcessingInfo> Races;
+            #region fields
+            public readonly string GameDataPath;
+            public readonly string OutputName;
+            public readonly bool FlagESL;
+            public readonly int MaxMasters;
+            public readonly int MaxNewRecords;
             public readonly GeneralSettings GenSettings;
             public readonly IEnumerable<Regex> NonWearableArmorRegexes;
+            private readonly List<OutputMod> Outputs = [];
+            private readonly HashSet<string> _missingModelPaths = [];
+            #endregion
+
+            #region properties
+            public IEnumerable<string> CreatedFiles => [..Outputs.Select(o => o.Output.ModKey.FileName.String).Order()];
+            public IEnumerable<ArmorRaceProcessingInfo> Races { get; set; } = [];
+            public IProgress<ProgressInfo>? Progress { get; set; }
+            public CancellationToken? CancellationToken { get; set; }
+            public bool IsCancellationRequested => CancellationToken.HasValue && CancellationToken.Value.IsCancellationRequested;
+            public HashSet<string> MissingModelPaths => _missingModelPaths;
             #endregion
 
             #region ctors
-            public ArmorProcessingInfo(SkyrimMod target, IEnumerable<ArmorRaceProcessingInfo> races, GeneralSettings genSettings, IEnumerable<Regex> nonWearableArmorRegexes)
+            public ArmorProcessingInfo(string gameDataPath, string outputName, bool flagESL, int maxMasters, int maxNewRecords, GeneralSettings genSettings, IEnumerable<Regex> nonWearableArmorRegexes)
             {
-                Target = target;
-                Races = races;
+                GameDataPath = gameDataPath;
+                OutputName = outputName;
+                FlagESL = flagESL;
+                MaxMasters = maxMasters;
+                MaxNewRecords = maxNewRecords;
                 GenSettings = genSettings;
                 NonWearableArmorRegexes = nonWearableArmorRegexes;
             }
             #endregion
+
+            #region methods
+            public SkyrimMod GetMod()
+            {
+                Outputs.Sort();
+                OutputMod? output = Outputs.FirstOrDefault();
+                output ??= GetNewOutput();
+                return output.Output;
+            }
+            public SkyrimMod GetMod(ArmorGroupInfo groupInfo)
+            {
+                if (FlagESL && groupInfo.NewRecords > MaxNewRecords) throw new ArgumentException("group of Armor/ArmorAddons has too many new records");
+                if (groupInfo.RequiredMasters.Count > MaxMasters) throw new ArgumentException("group of Armor/ArmorAddons requires too many plugin masters");
+                Outputs.Sort();
+                OutputMod? output = Outputs.FirstOrDefault(m => (!FlagESL || m.NewRecordCount + groupInfo.NewRecords <= MaxNewRecords) && m.Masters.Union(groupInfo.RequiredMasters).Count() <= MaxMasters);
+                output ??= GetNewOutput();
+                output.NewRecordCount += groupInfo.NewRecords;
+                output.Masters.UnionWith(groupInfo.RequiredMasters);
+                return output.Output;
+            }
+            public void WriteOutputMods()
+            {
+                foreach (var output in Outputs)
+                {
+                    output.Output.BeginWrite
+                        .ToPath(Path.Combine(GameDataPath, output.Output.ModKey.FileName.String))
+                        .WithDefaultLoadOrder()
+                        .WriteAsync().Wait();
+                }
+            }
+            #endregion
+
+            #region methods (helping)
+            private OutputMod GetNewOutput()
+            {
+                var modKey = new ModKey($"{OutputName}{Outputs.Count + 1:D2}", ModType.Plugin);
+                var mod = new SkyrimMod(modKey, SkyrimRelease.SkyrimSE);
+                if (FlagESL) mod.ModHeader.Flags |= SkyrimModHeader.HeaderFlag.Small;
+                var output = new OutputMod(mod);
+                Outputs.Add(output);
+                return output;
+            }
+            #endregion
+
+            private class OutputMod : IComparable<OutputMod>
+            {
+                #region fields
+                public readonly SkyrimMod Output;
+                #endregion
+
+                #region properties
+                public int NewRecordCount { get; set; }
+                public HashSet<ModKey> Masters { get; set; } = [];
+                #endregion
+
+                #region ctors
+                public OutputMod(SkyrimMod output)
+                {
+                    Output = output;
+                }
+                #endregion
+
+                #region methods
+                public int CompareTo(OutputMod? output)
+                {
+                    return NewRecordCount - (output?.NewRecordCount ?? 0);
+                }
+                #endregion
+            }
         }
 
         public class ArmorRaceProcessingInfo
         {
             #region fields
-            public readonly RacePair Race;
+            public readonly RaceIDPair Race;
             public readonly bool CustomHead;
             public readonly bool CustomBody;
             public readonly bool CustomHands;
             public readonly bool CustomFeet;
             public readonly bool ProcessMale;
             public readonly bool ProcessFemale;
-            public readonly IEnumerable<KeyValuePair<Regex, string>> ModelPathReplacers;
+            public readonly IEnumerable<ModelPathRegexInfo> ModelPathReplacers;
             #endregion
 
             #region ctors
-            public ArmorRaceProcessingInfo(RacePair race, bool customHead, bool customBody, bool customHands, bool customFeet, bool procMale, bool procFemale, IEnumerable<KeyValuePair<Regex, string>> modelPathReplacers)
+            public ArmorRaceProcessingInfo(RaceIDPair race, bool customHead, bool customBody, bool customHands, bool customFeet, bool procMale, bool procFemale, IEnumerable<ModelPathRegexInfo> modelPathReplacers)
             {
                 Race = race;
                 CustomHead = customHead;
@@ -313,7 +324,7 @@ namespace SSE.CRA.BL
             #endregion
 
             #region methods
-            public bool CheckIfNeedsCustomArmature(IArmorAddonGetter armature, out KeyValuePair<Regex, string>? maleRegex, out KeyValuePair<Regex, string>? femaleRegex)
+            public bool CheckIfNeedsCustomArmature(IArmorAddonGetter armature, out ModelPathRegexInfo? maleRegex, out ModelPathRegexInfo? femaleRegex)
             {
                 maleRegex = null;
                 femaleRegex = null;
@@ -332,13 +343,11 @@ namespace SSE.CRA.BL
                 }
                 if (ProcessMale && armature.WorldModel.Male is not null)
                 {
-                    var pair = ModelPathReplacers.FirstOrDefault(mpr => mpr.Key.IsMatch(armature.WorldModel.Male.File.GivenPath));
-                    if (pair.Key is not null) maleRegex = pair;
+                    maleRegex = ModelPathReplacers.FirstOrDefault(mpr => mpr.Regex.IsMatch(armature.WorldModel.Male.File.GivenPath));
                 }
                 if (ProcessFemale && armature.WorldModel.Female is not null)
                 {
-                    var pair = ModelPathReplacers.FirstOrDefault(mpr => mpr.Key.IsMatch(armature.WorldModel.Female.File.GivenPath));
-                    if (pair.Key is not null) femaleRegex = pair;
+                    femaleRegex = ModelPathReplacers.FirstOrDefault(mpr => mpr.Regex.IsMatch(armature.WorldModel.Female.File.GivenPath));
                 }
                 return maleRegex is not null || femaleRegex is not null;
             }
@@ -352,21 +361,48 @@ namespace SSE.CRA.BL
             #endregion
         }
 
-        public readonly struct ProcessedArmorResult(int armorCount, int overwriteAAs, int newAAs, int missingPaths)
+        public readonly struct ProcessedArmorResult(int armorCount, int overriddenAACount, int newAACount, int missingPathCount, IEnumerable<string> createdFiles)
         {
             #region fields
             public readonly int ArmorCount = armorCount;
-            public readonly int OverwriteAAs = overwriteAAs;
-            public readonly int NewAAs = newAAs;
-            public readonly int MissingPaths = missingPaths;
+            public readonly int OverriddenAACount = overriddenAACount;
+            public readonly int NewAACount = newAACount;
+            public readonly int MissingPathCount = missingPathCount;
+            public readonly IEnumerable<string> CreatedFiles = createdFiles;
             #endregion
         }
 
-        public readonly struct RacePair(Race race, Race vamp)
+        public readonly struct RaceIDPair(RaceID main, RaceID vamp)
         {
             #region fields
-            public readonly Race MainRace = race;
-            public readonly Race VampireRace = vamp;
+            public readonly RaceID Main = main;
+            public readonly RaceID Vamp = vamp;
+            #endregion
+
+            #region methods
+            public static RaceIDPair FromEditorIDs(string main, string vamp)
+            {
+                return new RaceIDPair(new RaceID(main), new RaceID(vamp));
+            }
+            #endregion
+        }
+
+        public class RaceID
+        {
+            #region fields
+            public readonly string EditorID;
+            #endregion
+
+            #region properties
+            public FormKey Key => Getter?.FormKey ?? new();
+            public IRaceGetter? Getter { get; set; }
+            #endregion
+
+            #region ctors
+            public RaceID(string editorID)
+            {
+                EditorID = editorID;
+            }
             #endregion
         }
     }

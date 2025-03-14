@@ -15,5 +15,7 @@ namespace SSE.CRA.VM
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(propertyName));
         }
         #endregion
+
+        public delegate void DialogResultEventHandler(bool result);
     }
 }

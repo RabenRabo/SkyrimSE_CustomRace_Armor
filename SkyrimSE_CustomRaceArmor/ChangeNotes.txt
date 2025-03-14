@@ -1,4 +1,10 @@
-﻿Version 1.0.1
+﻿Version 1.1.0
+Added confirmation message before deleting old mod files (don't like deleting files without user confirmation)
+Implemented "max. plugin masters": avoids "too many masters" error for big load orders with many armor mods by distributing to multiple output files
+Implemented "Flag ESL": if checked (by default yes) will flag output ESP as ESL (ESPFE) and limit new records per output file
+Fixed statistics on processing finish: counted overriden and new ArmorAddons multiple times if re-used by multiple armor pieces
+
+Version 1.0.1
 Added license information
 
 Version 1.0.0
