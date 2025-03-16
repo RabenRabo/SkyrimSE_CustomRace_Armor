@@ -1,4 +1,8 @@
-﻿Version 1.2.0
+﻿Version 1.3.0
+Patcher now remembers log level, and user settings for each skyrim version
+Added browse/reset button for custom game data path.
+
+Version 1.2.0
 Added experimental option to select game version (SkyrimSE, SkyrimSEGog, SkyrimVR)
 Added Refresh button to list of races with console messages (for debugging purposes)
 Added application icon and About dialog

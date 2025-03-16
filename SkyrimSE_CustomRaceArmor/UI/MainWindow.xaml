@@ -7,7 +7,7 @@
         xmlns:vm="clr-namespace:SSE.CRA.VM"
         xmlns:clr="clr-namespace:System;assembly=mscorlib"
         mc:Ignorable="d"
-        Title="Skyrim AE Custom Race Armor Patcher" Height="700" Width="500" ResizeMode="CanMinimize" Loaded="Window_Loaded">
+        Title="Skyrim AE Custom Race Armor Patcher" Height="700" Width="500" ResizeMode="CanMinimize" Loaded="Window_Loaded" Closing="Window_Closing">
     <Window.DataContext>
         <vm:MainViewModel/>
     </Window.DataContext>
@@ -27,7 +27,21 @@
             <RowDefinition Height="Auto"/>
             <RowDefinition Height="*"/>
         </Grid.RowDefinitions>
-        <ComboBox ItemsSource="{Binding Path=SkyrimVersionItems}" SelectedValue="{Binding Path=SelectedSkyrimVersion}"/>
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="*"/>
+                <RowDefinition Height="*"/>
+            </Grid.RowDefinitions>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+            <ComboBox Grid.ColumnSpan="3" ItemsSource="{Binding Path=SkyrimVersionItems}" SelectedValue="{Binding Path=SelectedSkyrimVersion}"/>
+            <TextBlock Grid.Row="1" Text="{Binding Path=GameDataPath}"/>
+            <Button Grid.Column="1" Grid.Row="1" Command="{Binding Path=SelectGameDataPathCommand}">Browse</Button>
+            <Button Grid.Column="2" Grid.Row="1" Command="{Binding Path=ResetGameDataPathCommand}">Reset</Button>
+        </Grid>
         <GroupBox Grid.Row="1" Header="Select races to process">
             <Grid>
                 <ListView Height="75" SelectionMode="Single" ItemsSource="{Binding Path=Races}">
@@ -113,17 +127,17 @@
                     <Label DockPanel.Dock="Left">Plugin Name</Label>
                     <CheckBox DockPanel.Dock="Right" IsChecked="{Binding Path=FlagESL}" VerticalAlignment="Center">flag ESL</CheckBox>
                     <Border BorderBrush="{Binding Path=OutputNameValid, Converter={StaticResource ResourceKey=ValidityBrushConverter}}" BorderThickness="1">
-                        <TextBox Text="{Binding Path=OutputName}" Height="25"/>
+                        <TextBox Text="{Binding Path=OutputName, UpdateSourceTrigger=PropertyChanged}" Height="25"/>
                     </Border>
                 </DockPanel>
                 <UniformGrid Columns="4">
                     <Label>Max. plugin masters:</Label>
                     <Border BorderBrush="{Binding Path=MaxPluginMastersValid, Converter={StaticResource ResourceKey=ValidityBrushConverter}}" BorderThickness="1">
-                        <TextBox Text="{Binding Path=MaxPluginMasters}"/>
+                        <TextBox Text="{Binding Path=MaxPluginMasters, UpdateSourceTrigger=PropertyChanged}"/>
                     </Border>
                     <Label>Max. new records:</Label>
                     <Border BorderBrush="{Binding Path=MaxNewRecordsValid, Converter={StaticResource ResourceKey=ValidityBrushConverter}}" BorderThickness="1">
-                        <TextBox Text="{Binding Path=MaxNewRecords}" IsEnabled="{Binding Path=FlagESL}"/>
+                        <TextBox Text="{Binding Path=MaxNewRecords, UpdateSourceTrigger=PropertyChanged}" IsEnabled="{Binding Path=FlagESL}"/>
                     </Border>
                 </UniformGrid>
                 <Button Height="25" Command="{Binding Path=PatchCommand}">Patch</Button>

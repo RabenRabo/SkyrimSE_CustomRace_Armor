@@ -12,26 +12,34 @@ namespace SSE.CRA.VM
 {
     internal class MainViewModel : BaseViewModel
     {
+        private const string DefaultOutputName = "CustomRacesArmor";
+        private const bool DefaultFlagESL = true;
+        private const int DefaultMaxPluginMasters = 200;
+        private const int DefaultMaxNewRecords = 2000;
+
         public static readonly IEnumerable<IRaceSettingsAL> RaceSettingsALs = [new RaceSettingsJsonAL() { Directory = MainViewModel.RaceSettingsDefaultDirectory }];
         public const string RaceSettingsDefaultDirectory = "RaceSettings";
         public const string GeneralSettingsDefaultFile = "GeneralSettings.json";
         public static readonly SkyrimRelease[] SkyrimVersions = [SkyrimRelease.SkyrimSE, SkyrimRelease.SkyrimSEGog, SkyrimRelease.SkyrimVR];
 
         #region fields
+        private readonly IUserSettingsAL _userSettingsAL = new UserSettingsJsonAL("Settings.user");
+        private readonly Dictionary<SkyrimRelease, VersionUserSettings> _userSettings = [];
         private string _gameDataPath = "";
+        private string? _customGameDataPath;
         private bool _running = false;
         private SkyrimRelease _selectedSkyrimVersion = SkyrimRelease.SkyrimSE;
         private bool _showRaceConfiguration = false;
         private RaceViewModel? _selectedRace;
         private string[] _nonWearableArmorRegexes = [@"^(?:dlc\d+\\)?actors\\", @"^(?:dlc\d+\\)?effects\\"];
-        private string _outputName = "CustomRacesArmor";
-        private bool _flagESL = true;
-        private int _maxNewRecordsInt;
-        private string _maxNewRecords = "";
-        private int _maxPluginMastersInt;
-        private string _maxPluginMasters = "";
+        private string _outputName = DefaultOutputName;
+        private bool _flagESL = DefaultFlagESL;
+        private int _maxNewRecordsInt = DefaultMaxNewRecords;
+        private string _maxNewRecords = DefaultMaxNewRecords.ToString();
+        private int _maxPluginMastersInt = DefaultMaxPluginMasters;
+        private string _maxPluginMasters = DefaultMaxPluginMasters.ToString();
         private StringBuilder _consoleText = new StringBuilder();
-        private ProgressInfoTypes _selectedConsoleLevel = ProgressInfoTypes.Info;
+        private ProgressInfoTypes _selectedConsoleLevel = UserSettings.DefaultLogLevel;
         private readonly GeneralSettings _generalSettings;
         #endregion
 
@@ -42,6 +50,8 @@ namespace SSE.CRA.VM
         public DelegateCommandBase PatchCommand { get; private set; }
         public DelegateCommandBase SaveConsoleToFileCommand { get; private set; }
         public DelegateCommandBase AboutCommand { get; private set; }
+        public DelegateCommandBase SelectGameDataPathCommand { get; private set; }
+        public DelegateCommandBase ResetGameDataPathCommand { get; private set; }
         public bool Running => _running;
         public IEnumerable<SkyrimRelease> SkyrimVersionItems => SkyrimVersions;
         public SkyrimRelease SelectedSkyrimVersion
@@ -51,12 +61,16 @@ namespace SSE.CRA.VM
             {
                 if (_selectedSkyrimVersion != value)
                 {
+                    ClearConsole();
+                    RememberUserSettings();
                     _selectedSkyrimVersion = value;
                     RaisePropertyChanged();
-                    RefreshRaces();
+                    ReadDefaultGameDataPath();
+                    ApplyUserSettings();
                 }
             }
         }
+        public string GameDataPath => _customGameDataPath ?? _gameDataPath;
         public bool ShowRaceConfiguration
         {
             get => _showRaceConfiguration;
@@ -99,7 +113,7 @@ namespace SSE.CRA.VM
                 }
             }
         }
-        public bool OutputNameValid => !string.IsNullOrEmpty(_outputName) && int.TryParse(MaxNewRecords, out int mnr);
+        public bool OutputNameValid => !string.IsNullOrEmpty(_outputName);
         public bool FlagESL
         {
             get => _flagESL;
@@ -181,6 +195,8 @@ namespace SSE.CRA.VM
         #region ctors
         public MainViewModel()
         {
+            SelectGameDataPathCommand = new DelegateCommand(SelectGameDataPath);
+            ResetGameDataPathCommand = new DelegateCommand(ResetGameDataPath, CanResetGameDataPath);
             RefreshRacesCommand = new DelegateCommand(RefreshRaces);
             SaveRaceSettingsCommand = new DelegateCommand(SaveRaceSettings, CanSaveRaceSettings);
             LoadRaceSettingsCommand = new DelegateCommand(LoadRaceSettings, CanLoadRaceSettings);
@@ -189,21 +205,53 @@ namespace SSE.CRA.VM
             AboutCommand = new DelegateCommand(About);
             var al = new GeneralSettingsJsonAL(GeneralSettingsDefaultFile);
             _generalSettings = al.Load();
-            MaxPluginMasters = "200";
-            MaxNewRecords = "2000";
         }
         #endregion
 
         #region methods
         public void Initialise()
         {
-            RefreshRaces();
+            try
+            {
+                PostConsoleMessage(ProgressInfoTypes.Info, "loading user settings");
+                var settings = _userSettingsAL.Load();
+                foreach (var item in settings.SettingsForVersions)
+                {
+                    _userSettings.Add(item.Version, item);
+                }
+                SelectedConsoleLevel = settings.LogLevel;
+            }
+            catch (Exception ex)
+            {
+                PostConsoleMessage(ProgressInfoTypes.Error, $"unable to load user settings: {ex.Message}");
+            }
+            ReadDefaultGameDataPath();
+            ApplyUserSettings();
+        }
+        public void Uninitialise()
+        {
+            RememberUserSettings();
+            try
+            {
+                _userSettingsAL.Save(new UserSettings() { LogLevel = SelectedConsoleLevel, SettingsForVersions = _userSettings.Values.ToArray() });
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show(Application.Current.MainWindow, $"ERROR: unable to save user settings: {ex.Message}", "Error", MessageBoxButton.OK, MessageBoxImage.Error);
+            }
         }
         #endregion
 
         #region methods (helping)
+        private static bool ComparePaths(string path1, string path2)
+        {
+            string p1 = Path.GetFullPath(new Uri(path1).LocalPath).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            string p2 = Path.GetFullPath(new Uri(path2).LocalPath).TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            return string.Equals(p1, p2, StringComparison.InvariantCultureIgnoreCase);
+        }
         private void UpdateEnabled()
         {
+            ResetGameDataPathCommand.RaiseCanExecuteChanged();
             PatchCommand.RaiseCanExecuteChanged();
             SaveRaceSettingsCommand.RaiseCanExecuteChanged();
             LoadRaceSettingsCommand.RaiseCanExecuteChanged();
@@ -223,6 +271,131 @@ namespace SSE.CRA.VM
                 ConsoleTextChanged?.Invoke(message, true);
             }
         }
+        private void ReadDefaultGameDataPath()
+        {
+            try
+            {
+                using (var modding = new Modding(_selectedSkyrimVersion))
+                {
+                    _gameDataPath = modding.GetGameDataPath();
+                    PostConsoleMessage(ProgressInfoTypes.Trace, $"retrieved default game data path {_gameDataPath}");
+                }
+            }
+            catch (Exception ex)
+            {
+                _gameDataPath = "";
+                PostConsoleMessage(ProgressInfoTypes.Error, $"unable to retrieve default game data path: {ex.Message}");
+            }
+            if (_customGameDataPath is null) RaisePropertyChanged(nameof(GameDataPath));
+        }
+        private void ApplyUserSettings()
+        {
+            if(!_userSettings.TryGetValue(SelectedSkyrimVersion, out var settings))
+            {
+                _customGameDataPath = null;
+                OutputName = DefaultOutputName;
+                FlagESL = DefaultFlagESL;
+                MaxPluginMasters = DefaultMaxPluginMasters.ToString();
+                MaxNewRecords = DefaultMaxNewRecords.ToString();
+            }
+            else
+            {
+                _customGameDataPath = settings.CustomGameDataPath;
+                OutputName = settings.OutputName ?? DefaultOutputName;
+                FlagESL = settings.FlagESL ?? true;
+                MaxPluginMasters = settings.MaxPluginMasters.ToString() ?? DefaultMaxPluginMasters.ToString();
+                MaxNewRecords = settings.MaxNewRecords.ToString() ?? DefaultMaxNewRecords.ToString();
+            }
+            RefreshRaces();
+            if( settings is not null)
+            {
+                foreach(var raceID in settings.SelectedRaces)
+                {
+                    var race = Races.FirstOrDefault(r => r.Model.Main == raceID);
+                    if(race is not null) race.ToBeProcessed = true;
+                }
+            }
+        }
+        private void RememberUserSettings()
+        {
+            bool isNotDefault = false;
+            VersionUserSettings settings = new()
+            {
+                Version = SelectedSkyrimVersion
+            };
+            if(_customGameDataPath is not null)
+            {
+                isNotDefault  = true;
+                settings.CustomGameDataPath = _customGameDataPath;
+            }
+            if(OutputName != DefaultOutputName)
+            {
+                isNotDefault = true;
+                settings.OutputName = OutputName;
+            }
+            if(FlagESL != DefaultFlagESL)
+            {
+                isNotDefault = true;
+                settings.FlagESL = FlagESL;
+            }
+            if (_maxPluginMastersInt != DefaultMaxPluginMasters)
+            {
+                isNotDefault = true;
+                settings.MaxPluginMasters = _maxPluginMastersInt;
+            }
+            if (_maxNewRecordsInt != DefaultMaxNewRecords)
+            {
+                isNotDefault = true;
+                settings.MaxNewRecords = _maxNewRecordsInt;
+            }
+            settings.SelectedRaces = Races.Where(r => r.ToBeProcessed).Select(r => r.Model.Main).ToArray();
+            isNotDefault = isNotDefault || settings.SelectedRaces.Any();
+            if (isNotDefault)
+            {
+                _userSettings[SelectedSkyrimVersion] = settings;
+            }
+            else
+            {
+                _userSettings.Remove(SelectedSkyrimVersion);
+            }
+        }
+
+        #region commands
+        private void SelectGameDataPath()
+        {
+            var dlg = new OpenFolderDialog()
+            {
+                Title = "Select Game Data folder"
+            };
+            if(_customGameDataPath is not null) dlg.InitialDirectory = _customGameDataPath;
+            else if(!string.IsNullOrEmpty(_gameDataPath)) dlg.InitialDirectory = _gameDataPath;
+            if(dlg.ShowDialog(Application.Current.MainWindow) == true)
+            {
+                if(ComparePaths(dlg.FolderName, _gameDataPath))
+                {
+                    _customGameDataPath = null;
+                }
+                else
+                {
+                    _customGameDataPath = dlg.FolderName;
+                }
+                RaisePropertyChanged(nameof(GameDataPath));
+                RefreshRaces();
+            }
+        }
+        private bool CanResetGameDataPath()
+        {
+            return _customGameDataPath is not null;
+        }
+        private void ResetGameDataPath()
+        {
+            if (_customGameDataPath is not null)
+            {
+                _customGameDataPath = null;
+                RaisePropertyChanged(nameof(GameDataPath));
+                RefreshRaces();
+            }
+        }
         private void RefreshRaces()
         {
             try
@@ -233,11 +406,9 @@ namespace SSE.CRA.VM
                     race.PropertyChanged -= Race_PropertyChanged;
                     race.UpdateEnabledRequested -= Race_UpdateEnabledRequested;
                 }
-                using (var modding = new Modding(_selectedSkyrimVersion))
+                using (var modding = new Modding(_selectedSkyrimVersion, GameDataPath))
                 {
-                    _gameDataPath = modding.GetGameDataPath();
-                    PostConsoleMessage(ProgressInfoTypes.Trace, $"retrieved game data path {_gameDataPath}");
-                    var result = modding.GetRaces();//.Select(pair => new RaceViewModel(pair.Key, pair.Value)).ToArray();
+                    var result = modding.GetRaces();
                     Races = result.CustomRaces.Select(r => new RaceViewModel(r)).ToArray();
                     PostConsoleMessage(ProgressInfoTypes.Debug, $"found {result.CustomRaces.Count()} custom races, {result.VanillaRacesCount} vanilla races, {result.IncompleteRaces} incomplete races");
                 }
@@ -261,7 +432,9 @@ namespace SSE.CRA.VM
                 Races = [];
                 PostConsoleMessage(ProgressInfoTypes.Error, $"unable to refresh races: {ex.Message}");
             }
+            RaisePropertyChanged(nameof(GameDataPath));
             RaisePropertyChanged(nameof(Races));
+            UpdateEnabled();
         }
         private bool CanSaveRaceSettings()
         {
@@ -347,7 +520,7 @@ namespace SSE.CRA.VM
             try
             {
                 var modFileRegex = new Regex(OutputName + @"\d*\.esp", RegexOptions.IgnoreCase);
-                filesToBeDeleted = Directory.EnumerateFiles(_gameDataPath).Where(f => modFileRegex.IsMatch(f)).Select(f => Path.GetFileName(f)).ToArray();
+                filesToBeDeleted = Directory.EnumerateFiles(GameDataPath).Where(f => modFileRegex.IsMatch(f)).Select(f => Path.GetFileName(f)).ToArray();
             }
             catch (Exception ex)
             {
@@ -387,12 +560,12 @@ namespace SSE.CRA.VM
                         foreach (var file in filesToBeDeleted)
                         {
                             progress.Report(new ProgressInfo(ProgressInfoTypes.Info, $"deleting old modfile {file}"));
-                            File.Delete(Path.Combine(_gameDataPath, file));
+                            File.Delete(Path.Combine(GameDataPath, file));
                         }
                     }
-                    modding = new Modding(SelectedSkyrimVersion);
+                    modding = new Modding(SelectedSkyrimVersion, GameDataPath);
                     var processingInfo = new Modding.ArmorProcessingInfo(
-                        _gameDataPath,
+                        GameDataPath,
                         OutputName,
                         FlagESL,
                         _maxPluginMastersInt,
@@ -462,6 +635,7 @@ namespace SSE.CRA.VM
         {
             new AboutDialog() { Owner = Application.Current.MainWindow }.ShowDialog();
         }
+        #endregion
         #endregion
 
         #region event handlers

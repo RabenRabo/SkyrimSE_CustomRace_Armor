@@ -25,6 +25,10 @@ namespace SSE.CRA.UI
         {
             ((MainViewModel)DataContext).Initialise();
         }
+        private void Window_Closing(object sender, System.ComponentModel.CancelEventArgs e)
+        {
+            ((MainViewModel)DataContext).Uninitialise();
+        }
         private void Vm_ConsoleTextChanged(string msg, bool newline)
         {
             txtConsole.AppendText(msg);

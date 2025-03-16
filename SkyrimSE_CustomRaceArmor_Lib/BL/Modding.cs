@@ -19,6 +19,11 @@ namespace SSE.CRA.BL
         {
             _environment = GameEnvironment.Typical.Skyrim(version);
         }
+        public Modding(SkyrimRelease version, string customGameDataPath)
+        {
+            _environment = GameEnvironment.Typical.Builder<ISkyrimMod, ISkyrimModGetter>(GameRelease.SkyrimSE)
+                .WithTargetDataFolder(customGameDataPath).Build();
+        }
         #endregion
 
         #region methods
