@@ -1,4 +1,9 @@
-﻿Version 1.1.0
+﻿Version 1.2.0
+Added experimental option to select game version (SkyrimSE, SkyrimSEGog, SkyrimVR)
+Added Refresh button to list of races with console messages (for debugging purposes)
+Added application icon and About dialog
+
+Version 1.1.0
 Added confirmation message before deleting old mod files (don't like deleting files without user confirmation)
 Implemented "max. plugin masters": avoids "too many masters" error for big load orders with many armor mods by distributing to multiple output files
 Implemented "Flag ESL": if checked (by default yes) will flag output ESP as ESL (ESPFE) and limit new records per output file

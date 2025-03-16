@@ -11,7 +11,14 @@ namespace SSE.CRA.BL
     public class Modding : IDisposable
     {
         #region fields
-        private readonly IGameEnvironment<ISkyrimMod, ISkyrimModGetter> _environment = GameEnvironment.Typical.Skyrim(SkyrimRelease.SkyrimSE);
+        private readonly IGameEnvironment<ISkyrimMod, ISkyrimModGetter> _environment;
+        #endregion
+
+        #region ctors
+        public Modding(SkyrimRelease version)
+        {
+            _environment = GameEnvironment.Typical.Skyrim(version);
+        }
         #endregion
 
         #region methods
@@ -23,33 +30,43 @@ namespace SSE.CRA.BL
         /// Returns a list of all non-vanilla races (along with their vampire equivalent)
         /// </summary>
         /// <returns></returns>
-        public IEnumerable<KeyValuePair<string, string>> GetRaces()
+        public CustomRacesResult GetRaces()
         {
-            Dictionary<string, KeyValuePair<IRaceGetter?, IRaceGetter?>> res = [];
-            foreach (var raceGetter in _environment.LoadOrder.PriorityOrder.Race().WinningOverrides())
+            Dictionary<string, RaceInfo> res = [];
+            foreach (var raceGetter in _environment.LoadOrder.PriorityOrder.OnlyEnabled().Race().WinningOverrides())
             {
-                if (raceGetter.EditorID is not null && raceGetter.FormKey.ModKey != Skyrim.ModKey)
+                // skip if no EditorID (?!)
+                if (raceGetter.EditorID is null) continue;
+                string mainEditorID;
+                bool isVamp;
+                // check if vampire race
+                if (raceGetter.EditorID.EndsWith("Vampire"))
                 {
-                    string editorID;
-                    bool isVamp;
-                    if (raceGetter.EditorID.EndsWith("Vampire"))
-                    {
-                        editorID = raceGetter.EditorID[..^"Vampire".Length];
-                        isVamp = true;
-                    }
-                    else
-                    {
-                        editorID = raceGetter.EditorID;
-                        isVamp = false;
-                    }
-                    if (!res.TryGetValue(editorID, out var pair))
-                    {
-                        pair = new();
-                    }
-                    res[editorID] = new(isVamp ? pair.Key : raceGetter, isVamp ? raceGetter : pair.Value);
+                    mainEditorID = raceGetter.EditorID[..^"Vampire".Length];
+                    isVamp = true;
+                }
+                else
+                {
+                    mainEditorID = raceGetter.EditorID;
+                    isVamp = false;
+                }
+                // save in result
+                if (!res.TryGetValue(mainEditorID, out var info))
+                {
+                    info = new RaceInfo();
+                    info.ModKey = raceGetter.FormKey.ModKey;
+                    res.Add(mainEditorID, info);
+                }
+                if (isVamp)
+                {
+                    info.VampEditorID = raceGetter.EditorID;
+                }
+                else
+                {
+                    info.EditorID = raceGetter.EditorID;
                 }
             }
-            return res.Values.Where(pair => pair.Key is not null && pair.Value is not null).Select(pair => new KeyValuePair<string, string>(pair.Key!.EditorID!, pair.Value!.EditorID!)).ToArray();
+            return new(res.Values.Where(r => !r.IsIncomplete && !r.IsVanilla).Select(r => new RaceEditorIDPair(r.EditorID!, r.VampEditorID!)).ToArray(), res.Values.Count(r => r.IsVanilla), res.Values.Count(r => r.IsIncomplete));
         }
         /// <summary>
         /// Removes ArmorRace from race and raceVampire, and updates Race and AdditionalRaces of naked skin
@@ -190,6 +207,16 @@ namespace SSE.CRA.BL
         }
         #endregion
 
+        private class RaceInfo
+        {
+            #region properties
+            public ModKey ModKey { get; set; }
+            public string? EditorID { get; set; }
+            public string? VampEditorID { get; set; }
+            public bool IsVanilla => ModKey == Skyrim.ModKey || ModKey == Dawnguard.ModKey || ModKey == Dragonborn.ModKey;
+            public bool IsIncomplete => EditorID is null || VampEditorID is null;
+            #endregion
+        }
         public class ArmorProcessingInfo
         {
             #region fields
@@ -205,7 +232,7 @@ namespace SSE.CRA.BL
             #endregion
 
             #region properties
-            public IEnumerable<string> CreatedFiles => [..Outputs.Select(o => o.Output.ModKey.FileName.String).Order()];
+            public IEnumerable<string> CreatedFiles => [.. Outputs.Select(o => o.Output.ModKey.FileName.String).Order()];
             public IEnumerable<ArmorRaceProcessingInfo> Races { get; set; } = [];
             public IProgress<ProgressInfo>? Progress { get; set; }
             public CancellationToken? CancellationToken { get; set; }
@@ -372,6 +399,23 @@ namespace SSE.CRA.BL
             #endregion
         }
 
+        public readonly struct CustomRacesResult(IEnumerable<RaceEditorIDPair> customRaces, int vanillaRacesCount, int incompleteRaces)
+        {
+            #region fields
+            public readonly IEnumerable<RaceEditorIDPair> CustomRaces = customRaces;
+            public readonly int VanillaRacesCount = vanillaRacesCount;
+            public readonly int IncompleteRaces = incompleteRaces;
+            #endregion
+        }
+
+        public readonly struct RaceEditorIDPair(string main, string vamp)
+        {
+            #region fields
+            public readonly string Main = main;
+            public readonly string Vamp = vamp;
+            #endregion
+        }
+
         public readonly struct RaceIDPair(RaceID main, RaceID vamp)
         {
             #region fields
@@ -380,9 +424,9 @@ namespace SSE.CRA.BL
             #endregion
 
             #region methods
-            public static RaceIDPair FromEditorIDs(string main, string vamp)
+            public static RaceIDPair FromEditorIDs(RaceEditorIDPair pair)
             {
-                return new RaceIDPair(new RaceID(main), new RaceID(vamp));
+                return new RaceIDPair(new RaceID(pair.Main), new RaceID(pair.Vamp));
             }
             #endregion
         }

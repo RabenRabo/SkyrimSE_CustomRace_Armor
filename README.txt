@@ -12,3 +12,4 @@ LICENSES
 
 This software is licensed under the MIT license (see LICENSE.txt)
 The Mutagen framework is licensed under the GPLv3 license (see Licenses/Mutagen_LICENSE.txt)
+The armour part of the app icon was created by Delapouite and licensed under CC BY 3.0 (see Licenses/ArmourIcon_LICENSE.txt)

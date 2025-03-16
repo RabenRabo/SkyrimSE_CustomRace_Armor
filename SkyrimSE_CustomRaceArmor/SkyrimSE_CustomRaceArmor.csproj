@@ -10,12 +10,18 @@
     <Authors>RabenRabo</Authors>
     <Company />
     <Product>Skyrim SE Custom Race Armor</Product>
-    <AssemblyVersion>1.1.0.0</AssemblyVersion>
-    <FileVersion>1.1.0.0</FileVersion>
+    <AssemblyVersion>1.2.0.0</AssemblyVersion>
+    <FileVersion>1.2.0.0</FileVersion>
+    <ApplicationIcon>Resources\ArmorPatcher.ico</ApplicationIcon>
   </PropertyGroup>
 
   <ItemGroup>
     <None Remove="README.txt" />
+    <None Remove="Resources\ArmorPatcher.png" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="Resources\ArmorPatcher.ico" />
   </ItemGroup>
 
   <ItemGroup>
@@ -40,6 +46,10 @@
   </ItemGroup>
 
   <ItemGroup>
+    <Resource Include="Resources\ArmorPatcher.png" />
+  </ItemGroup>
+
+  <ItemGroup>
     <None Update="ChangeNotes.txt">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
@@ -47,6 +57,9 @@
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
     <None Update="LICENSE.txt">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </None>
+    <None Update="Licenses\ArmourIcon_LICENSE.txt">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>
     <None Update="Licenses\Mutagen_LICENSE.txt">

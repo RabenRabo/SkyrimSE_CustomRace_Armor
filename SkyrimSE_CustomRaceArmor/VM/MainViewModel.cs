@@ -15,12 +15,13 @@ namespace SSE.CRA.VM
         public static readonly IEnumerable<IRaceSettingsAL> RaceSettingsALs = [new RaceSettingsJsonAL() { Directory = MainViewModel.RaceSettingsDefaultDirectory }];
         public const string RaceSettingsDefaultDirectory = "RaceSettings";
         public const string GeneralSettingsDefaultFile = "GeneralSettings.json";
+        public static readonly SkyrimRelease[] SkyrimVersions = [SkyrimRelease.SkyrimSE, SkyrimRelease.SkyrimSEGog, SkyrimRelease.SkyrimVR];
 
         #region fields
-        private readonly string _gameDataPath;
+        private string _gameDataPath = "";
         private bool _running = false;
+        private SkyrimRelease _selectedSkyrimVersion = SkyrimRelease.SkyrimSE;
         private bool _showRaceConfiguration = false;
-        private readonly IEnumerable<RaceViewModel> _races;
         private RaceViewModel? _selectedRace;
         private string[] _nonWearableArmorRegexes = [@"^(?:dlc\d+\\)?actors\\", @"^(?:dlc\d+\\)?effects\\"];
         private string _outputName = "CustomRacesArmor";
@@ -35,11 +36,27 @@ namespace SSE.CRA.VM
         #endregion
 
         #region properties
+        public DelegateCommandBase RefreshRacesCommand { get; private set; }
         public DelegateCommandBase SaveRaceSettingsCommand { get; private set; }
         public DelegateCommandBase LoadRaceSettingsCommand { get; private set; }
         public DelegateCommandBase PatchCommand { get; private set; }
         public DelegateCommandBase SaveConsoleToFileCommand { get; private set; }
+        public DelegateCommandBase AboutCommand { get; private set; }
         public bool Running => _running;
+        public IEnumerable<SkyrimRelease> SkyrimVersionItems => SkyrimVersions;
+        public SkyrimRelease SelectedSkyrimVersion
+        {
+            get => _selectedSkyrimVersion;
+            set
+            {
+                if (_selectedSkyrimVersion != value)
+                {
+                    _selectedSkyrimVersion = value;
+                    RaisePropertyChanged();
+                    RefreshRaces();
+                }
+            }
+        }
         public bool ShowRaceConfiguration
         {
             get => _showRaceConfiguration;
@@ -54,7 +71,7 @@ namespace SSE.CRA.VM
             }
         }
         public string RaceConfigurationToggleButtonContent => _showRaceConfiguration ? "v" : ">";
-        public IEnumerable<RaceViewModel> Races => _races;
+        public IEnumerable<RaceViewModel> Races { get; private set; } = [];
         public RaceViewModel? SelectedRace
         {
             get => _selectedRace;
@@ -164,25 +181,23 @@ namespace SSE.CRA.VM
         #region ctors
         public MainViewModel()
         {
+            RefreshRacesCommand = new DelegateCommand(RefreshRaces);
             SaveRaceSettingsCommand = new DelegateCommand(SaveRaceSettings, CanSaveRaceSettings);
             LoadRaceSettingsCommand = new DelegateCommand(LoadRaceSettings, CanLoadRaceSettings);
             PatchCommand = new AsyncDelegateCommand(Patch, CanPatch);
             SaveConsoleToFileCommand = new DelegateCommand(SaveConsoleToFile);
+            AboutCommand = new DelegateCommand(About);
             var al = new GeneralSettingsJsonAL(GeneralSettingsDefaultFile);
             _generalSettings = al.Load();
-            using (var modding = new Modding())
-            {
-                _gameDataPath = modding.GetGameDataPath();
-                _races = modding.GetRaces().Select(pair => new RaceViewModel(pair.Key, pair.Value)).ToArray();
-            }
-            foreach (var race in _races)
-            {
-                race.TryLoadingRaceSettings();
-                race.PropertyChanged += Race_PropertyChanged;
-                race.UpdateEnabledRequested += Race_UpdateEnabledRequested;
-            }
             MaxPluginMasters = "200";
             MaxNewRecords = "2000";
+        }
+        #endregion
+
+        #region methods
+        public void Initialise()
+        {
+            RefreshRaces();
         }
         #endregion
 
@@ -192,6 +207,61 @@ namespace SSE.CRA.VM
             PatchCommand.RaiseCanExecuteChanged();
             SaveRaceSettingsCommand.RaiseCanExecuteChanged();
             LoadRaceSettingsCommand.RaiseCanExecuteChanged();
+        }
+        private void ClearConsole()
+        {
+            _consoleText.Clear();
+            ConsoleTextCleared?.Invoke(this, EventArgs.Empty);
+        }
+        private void PostConsoleMessage(ProgressInfoTypes level, string message)
+        {
+            if (level >= SelectedConsoleLevel)
+            {
+                _consoleText.Append(level.ToString().ToUpper()).Append(": ").AppendLine(message);
+                ConsoleTextChanged?.Invoke(level.ToString().ToUpper(), false);
+                ConsoleTextChanged?.Invoke(": ", false);
+                ConsoleTextChanged?.Invoke(message, true);
+            }
+        }
+        private void RefreshRaces()
+        {
+            try
+            {
+                PostConsoleMessage(ProgressInfoTypes.Debug, "(re)loading list of custom races");
+                foreach (var race in Races)
+                {
+                    race.PropertyChanged -= Race_PropertyChanged;
+                    race.UpdateEnabledRequested -= Race_UpdateEnabledRequested;
+                }
+                using (var modding = new Modding(_selectedSkyrimVersion))
+                {
+                    _gameDataPath = modding.GetGameDataPath();
+                    PostConsoleMessage(ProgressInfoTypes.Trace, $"retrieved game data path {_gameDataPath}");
+                    var result = modding.GetRaces();//.Select(pair => new RaceViewModel(pair.Key, pair.Value)).ToArray();
+                    Races = result.CustomRaces.Select(r => new RaceViewModel(r)).ToArray();
+                    PostConsoleMessage(ProgressInfoTypes.Debug, $"found {result.CustomRaces.Count()} custom races, {result.VanillaRacesCount} vanilla races, {result.IncompleteRaces} incomplete races");
+                }
+                foreach (var race in Races)
+                {
+                    bool foundRaceSettings = race.TryLoadingRaceSettings();
+                    if (foundRaceSettings)
+                    {
+                        PostConsoleMessage(ProgressInfoTypes.Trace, $"found and loaded custom race settings for {race.Name}");
+                    }
+                    else
+                    {
+                        PostConsoleMessage(ProgressInfoTypes.Debug, $"found no custom race settings for {race.Name}");
+                    }
+                    race.PropertyChanged += Race_PropertyChanged;
+                    race.UpdateEnabledRequested += Race_UpdateEnabledRequested;
+                }
+            }
+            catch(Exception ex)
+            {
+                Races = [];
+                PostConsoleMessage(ProgressInfoTypes.Error, $"unable to refresh races: {ex.Message}");
+            }
+            RaisePropertyChanged(nameof(Races));
         }
         private bool CanSaveRaceSettings()
         {
@@ -209,19 +279,19 @@ namespace SSE.CRA.VM
             {
                 InitialDirectory = defDir,
                 Filter = CreateRaceSettingsDialogFilter(),
-                FileName = RaceSettingsALs.FirstOrDefault()?.ConstructFilename(SelectedRace!.EditorID) ?? "",
+                FileName = RaceSettingsALs.FirstOrDefault()?.ConstructFilename(SelectedRace!.Model.Main) ?? "",
                 AddExtension = true,
                 OverwritePrompt = true,
                 Title = "save race settings to file"
             };
-            if (dlg.ShowDialog() == true)
+            if (dlg.ShowDialog(Application.Current.MainWindow) == true)
             {
                 string? ext = Path.GetExtension(dlg.FileName);
                 if (ext is not null) ext = ext[1..];
                 IRaceSettingsAL? al = RaceSettingsALs.FirstOrDefault(a => string.Equals(a.FileExtension, ext));
                 if (al is null)
                 {
-                    ConsoleTextChanged?.Invoke($"ERROR: unknown file extension {ext}", true);
+                    PostConsoleMessage(ProgressInfoTypes.Error, $"unknown file extension {ext}");
                     return;
                 }
                 var settings = new RaceSettings()
@@ -236,11 +306,11 @@ namespace SSE.CRA.VM
                 };
                 try
                 {
-                    al.Save(SelectedRace.EditorID, settings);
+                    al.Save(SelectedRace.Model.Main, settings);
                 }
                 catch (Exception ex)
                 {
-                    ConsoleTextChanged?.Invoke($"ERROR: while saving race settings: {ex.Message}", true);
+                    PostConsoleMessage(ProgressInfoTypes.Error, $"cannot save race settings: {ex.Message}");
                 }
             }
         }
@@ -268,109 +338,11 @@ namespace SSE.CRA.VM
         }
         private bool CanPatch()
         {
-            return OutputNameValid && MaxNewRecordsValid && MaxPluginMastersValid && _races.Any(r => r.ToBeProcessed);
+            return OutputNameValid && MaxNewRecordsValid && MaxPluginMastersValid && Races.Any(r => r.ToBeProcessed);
         }
-        //private async Task Patch()
-        //{
-        //    _consoleText.Clear();
-        //    ConsoleTextCleared?.Invoke(this, EventArgs.Empty);
-        //    string[] filesToBeDeleted;
-        //    try
-        //    {
-        //        var modFileRegex = new Regex(OutputName + @"\d*\.esp", RegexOptions.IgnoreCase);
-        //        filesToBeDeleted = Directory.EnumerateFiles(_gameDataPath).Where(f => modFileRegex.IsMatch(f)).Select(f => Path.GetFileName(f)).ToArray();
-        //    }
-        //    catch (Exception ex)
-        //    {
-        //        ConsoleTextChanged?.Invoke($"ERROR: while finding files to delete: {ex.Message}", true);
-        //        return;
-        //    }
-        //    if (filesToBeDeleted.Length > 1)
-        //    {
-        //        var dlg = new CheckListDialog()
-        //        {
-        //            Title = "Select files to delete",
-        //            ConfirmText = "Delete",
-        //            ItemsSource = filesToBeDeleted,
-        //            ItemPreselector = f => true
-        //        };
-        //        if (dlg.ShowDialog() != true) return;
-        //        filesToBeDeleted = dlg.SelectedItems.Cast<string>().ToArray();
-        //    }
-        //    else if (filesToBeDeleted.Length == 1)
-        //    {
-        //        if (MessageBox.Show($"The following file will be deleted: {filesToBeDeleted.First()}", "Confirm Deletion", MessageBoxButton.OKCancel, MessageBoxImage.Question) == MessageBoxResult.Cancel) return;
-        //    }
-        //    IProgress<ProgressInfo> progress = new Progress<ProgressInfo>();
-        //    ((Progress<ProgressInfo>)progress).ProgressChanged += Progress_ProgressChanged;
-        //    _running = true;
-        //    RaisePropertyChanged(nameof(Running));
-        //    await Task.Run(() =>
-        //    {
-        //        Modding? modding = null;
-        //        try
-        //        {
-        //            // delete old ESPs
-        //            if (filesToBeDeleted.Length > 0)
-        //            {
-        //                progress.Report(new ProgressInfo(ProgressInfoTypes.Trace, "deleting old modfile(s)"));
-        //                foreach (var file in filesToBeDeleted)
-        //                {
-        //                    progress.Report(new ProgressInfo(ProgressInfoTypes.Info, $"deleting old modfile {file}"));
-        //                    File.Delete(Path.Combine(_gameDataPath, file));
-        //                }
-        //            }
-        //            modding = new Modding();
-        //            progress.Report(new ProgressInfo(ProgressInfoTypes.Trace, "removing ArmorRace from race"));
-        //            var processingInfo = new Modding.ArmorProcessingInfo(
-        //                _gameDataPath,
-        //                OutputName,
-        //                FlagESL,
-        //                _maxPluginMastersInt,
-        //                _maxNewRecordsInt,
-        //                _generalSettings,
-        //                _nonWearableArmorRegexes.Select(nar => new Regex(nar, RegexOptions.IgnoreCase)).ToArray()
-        //            );
-        //            var races = _races.Where(r => r.ToBeProcessed).Select(r => new KeyValuePair<RaceViewModel, Modding.RaceGetterPair>(r, modding.RemoveArmorRace(processingInfo, r.EditorID, r.VampEditorID, progress))).ToArray();
-        //            processingInfo.Races = races.Select(pair =>
-        //                new Modding.ArmorRaceProcessingInfo(
-        //                    pair.Value,
-        //                    pair.Key.HasCustomHeadAA,
-        //                    pair.Key.HasCustomBodyAA,
-        //                    pair.Key.HasCustomHandsAA,
-        //                    pair.Key.HasCustomFeetAA,
-        //                    pair.Key.ProcessMale,
-        //                    pair.Key.ProcessFemale,
-        //                    pair.Key.ReplacerRegexes.Select(vm => new KeyValuePair<Regex, string>(new Regex(vm.SearchRegex, RegexOptions.IgnoreCase), vm.ReplaceString)).ToArray())).ToArray();
-        //            progress.Report(new ProgressInfo(ProgressInfoTypes.Debug, "removed ArmorRace from race"));
-        //            progress.Report(new ProgressInfo(ProgressInfoTypes.Trace, "updating race skin armor"));
-        //            int countSkinAAs = modding.SetArmorRaceOfSkin(processingInfo, progress);
-        //            progress.Report(new ProgressInfo(ProgressInfoTypes.Debug, $"updated race skin armor ({countSkinAAs} ArmorAddons updated)"));
-        //            progress.Report(new ProgressInfo(ProgressInfoTypes.Trace, "processing armor"));
-        //            var result = modding.ProcessArmor(processingInfo, progress, null);
-        //            progress.Report(new ProgressInfo(ProgressInfoTypes.Info, $"processed {result.ArmorCount} armor (overrode {result.OverwriteAAs} ArmorAddons, created {result.NewAAs} new ones, missing {result.MissingPaths} models)"));
-        //            progress.Report(new ProgressInfo(ProgressInfoTypes.Info, $"created {result.CreatedFiles.Count()} files"));
-        //            foreach (var file in result.CreatedFiles)
-        //            {
-        //                progress.Report(new ProgressInfo(ProgressInfoTypes.Info, $"-> {file}"));
-        //            }
-        //        }
-        //        catch (Exception ex)
-        //        {
-        //            progress.Report(new ProgressInfo(ProgressInfoTypes.Error, $"patch process aborted: {ex}"));
-        //        }
-        //        finally
-        //        {
-        //            modding?.Dispose();
-        //        }
-        //    });
-        //    _running = false;
-        //    RaisePropertyChanged(nameof(Running));
-        //}
         private async Task Patch()
         {
-            _consoleText.Clear();
-            ConsoleTextCleared?.Invoke(this, EventArgs.Empty);
+            ClearConsole();
             string[] filesToBeDeleted;
             try
             {
@@ -379,7 +351,7 @@ namespace SSE.CRA.VM
             }
             catch (Exception ex)
             {
-                ConsoleTextChanged?.Invoke($"ERROR: while finding files to delete: {ex.Message}", true);
+                PostConsoleMessage(ProgressInfoTypes.Error, $"unable to list files to delete: {ex.Message}");
                 return;
             }
             if (filesToBeDeleted.Length > 1)
@@ -389,14 +361,15 @@ namespace SSE.CRA.VM
                     Title = "Select files to delete",
                     ConfirmText = "Delete",
                     ItemsSource = filesToBeDeleted,
-                    ItemPreselector = f => true
+                    ItemPreselector = f => true,
+                    Owner = Application.Current.MainWindow,
                 };
                 if (dlg.ShowDialog() != true) return;
                 filesToBeDeleted = dlg.SelectedItems.Cast<string>().ToArray();
             }
             else if (filesToBeDeleted.Length == 1)
             {
-                if (MessageBox.Show($"The following file will be deleted: {filesToBeDeleted.First()}", "Confirm Deletion", MessageBoxButton.OKCancel, MessageBoxImage.Question) == MessageBoxResult.Cancel) return;
+                if (MessageBox.Show(Application.Current.MainWindow, $"The following file will be deleted: {filesToBeDeleted.First()}", "Confirm Deletion", MessageBoxButton.OKCancel, MessageBoxImage.Question) == MessageBoxResult.Cancel) return;
             }
             IProgress<ProgressInfo> progress = new Progress<ProgressInfo>();
             ((Progress<ProgressInfo>)progress).ProgressChanged += Progress_ProgressChanged;
@@ -417,7 +390,7 @@ namespace SSE.CRA.VM
                             File.Delete(Path.Combine(_gameDataPath, file));
                         }
                     }
-                    modding = new Modding();
+                    modding = new Modding(SelectedSkyrimVersion);
                     var processingInfo = new Modding.ArmorProcessingInfo(
                         _gameDataPath,
                         OutputName,
@@ -430,9 +403,9 @@ namespace SSE.CRA.VM
                     {
                         Progress = progress
                     };
-                    processingInfo.Races = _races.Where(r => r.ToBeProcessed).Select(r =>
+                    processingInfo.Races = Races.Where(r => r.ToBeProcessed).Select(r =>
                         new Modding.ArmorRaceProcessingInfo(
-                            Modding.RaceIDPair.FromEditorIDs(r.EditorID, r.VampEditorID),
+                            Modding.RaceIDPair.FromEditorIDs(r.Model),
                             r.HasCustomHeadAA,
                             r.HasCustomBodyAA,
                             r.HasCustomHandsAA,
@@ -485,6 +458,10 @@ namespace SSE.CRA.VM
                 }
             }
         }
+        private void About()
+        {
+            new AboutDialog() { Owner = Application.Current.MainWindow }.ShowDialog();
+        }
         #endregion
 
         #region event handlers
@@ -492,13 +469,7 @@ namespace SSE.CRA.VM
         {
             App.Current.MainWindow?.Dispatcher.BeginInvoke(() =>
             {
-                if (e.Type >= SelectedConsoleLevel)
-                {
-                    _consoleText.Append(e.Type.ToString().ToUpper()).Append(": ").AppendLine(e.Message);
-                    ConsoleTextChanged?.Invoke(e.Type.ToString().ToUpper(), false);
-                    ConsoleTextChanged?.Invoke(": ", false);
-                    ConsoleTextChanged?.Invoke(e.Message, true);
-                }
+                PostConsoleMessage(e.Type, e.Message);
             });
         }
         private void Race_PropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)

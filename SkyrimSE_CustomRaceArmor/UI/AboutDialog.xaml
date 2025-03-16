@@ -1,0 +1,28 @@
+﻿<Window x:Class="SSE.CRA.UI.AboutDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+        xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+        xmlns:local="clr-namespace:SSE.CRA.UI"
+        mc:Ignorable="d"
+        Title="About" ResizeMode="NoResize" ShowInTaskbar="False" WindowStartupLocation="CenterOwner" SizeToContent="WidthAndHeight" >
+    <Grid Margin="5" Width="256">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="256"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="5"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+        <Image Source="/Resources/ArmorPatcher.png"/>
+        <TextBlock Grid.Row="1" TextWrapping="Wrap">
+            This Skyrim Custom Race Armor patcher was implemented by RabenRabo and is published under the open source 
+            <Hyperlink NavigateUri="https://opensource.org/license/MIT" RequestNavigate="Hyperlink_RequestNavigate">MIT</Hyperlink> license.<LineBreak/>
+            It uses the Mutagen framework which is licensed under the open source 
+            <Hyperlink NavigateUri="https://opensource.org/license/gpl-3-0" RequestNavigate="Hyperlink_RequestNavigate">GPL v3.0</Hyperlink> license.<LineBreak/>
+            The armour part of the app icon was created by Delapouite and is licensed under
+            <Hyperlink NavigateUri="https://creativecommons.org/licenses/by/3.0/" RequestNavigate="Hyperlink_RequestNavigate">CC BY 3.0</Hyperlink><LineBreak/>
+            See README.txt for more information.
+        </TextBlock>
+        <Button Grid.Row="3" HorizontalAlignment="Center" Width="60" IsDefault="True" IsCancel="True">Close</Button>
+    </Grid>
+</Window>

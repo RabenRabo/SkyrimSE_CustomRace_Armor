@@ -1,13 +1,13 @@
 ﻿using SSE.CRA.AL;
 using System.Collections.ObjectModel;
+using static SSE.CRA.BL.Modding;
 
 namespace SSE.CRA.VM
 {
     internal class RaceViewModel : BaseViewModel
     {
         #region fields
-        public readonly string EditorID;
-        public readonly string VampEditorID;
+        public readonly RaceEditorIDPair Model;
         private bool _toBeProcessed;
         private bool _hasCustomHeadAA = false;
         private bool _hasCustomBodyAA = true;
@@ -34,7 +34,7 @@ namespace SSE.CRA.VM
         }
         public string Name
         {
-            get => EditorID!;
+            get => Model.Main;
         }
         public bool HasCustomHeadAA
         {
@@ -130,12 +130,11 @@ namespace SSE.CRA.VM
         #endregion
 
         #region ctors
-        public RaceViewModel(string editorID, string vampEditorID)
+        public RaceViewModel(RaceEditorIDPair model)
         {
+            Model = model;
             MoveReplacerRegexUpCommand = new DelegateCommand(MoveReplacerRegexUp, CanMoveReplacerRegexUp);
             MoveReplacerRegexDownCommand = new DelegateCommand(MoveReplacerRegexDown, CanMoveReplacerRegexDown);
-            EditorID = editorID;
-            VampEditorID = vampEditorID;
             var rr = new ReplacerRegexViewModel() { SearchRegex = "(.+)", ReplaceString = "Patched\\$1" };
             _replacerRegexes.Add(rr);
             _replacerRegexes.CollectionChanged += ReplacerRegexes_CollectionChanged;
@@ -143,19 +142,19 @@ namespace SSE.CRA.VM
         #endregion
 
         #region methods
-        public void TryLoadingRaceSettings()
+        public bool TryLoadingRaceSettings()
         {
             IRaceSettingsAL? raceSettingsAL = null;
             foreach (var al in MainViewModel.RaceSettingsALs)
             {
-                if (al.Exists(EditorID))
+                if (al.Exists(Model.Main))
                 {
                     raceSettingsAL = al;
                     break;
                 }
             }
-            if (raceSettingsAL is null) return;
-            RaceSettings settings = raceSettingsAL.Load(EditorID);
+            if (raceSettingsAL is null) return false;
+            RaceSettings settings = raceSettingsAL.Load(Model.Main);
             HasCustomHeadAA = settings.CustomHead;
             HasCustomBodyAA = settings.CustomBody;
             HasCustomHandsAA = settings.CustomHands;
@@ -167,6 +166,7 @@ namespace SSE.CRA.VM
             {
                 _replacerRegexes.Add(new ReplacerRegexViewModel() { SearchRegex = rr.Key, ReplaceString = rr.Value });
             }
+            return true;
         }
         public override string ToString()
         {

@@ -21,6 +21,10 @@ namespace SSE.CRA.UI
         #endregion
 
         #region event handlers
+        private void Window_Loaded(object sender, RoutedEventArgs e)
+        {
+            ((MainViewModel)DataContext).Initialise();
+        }
         private void Vm_ConsoleTextChanged(string msg, bool newline)
         {
             txtConsole.AppendText(msg);
