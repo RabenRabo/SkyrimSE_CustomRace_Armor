@@ -2,7 +2,7 @@
 
 namespace SSE.CRA.VM
 {
-    internal class ReplacerRegexViewModel : BaseViewModel
+    public class ReplacerRegexViewModel : BaseViewModel
     {
         #region fields
         private string _searchRegex = "";

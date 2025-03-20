@@ -1,0 +1,43 @@
+﻿<UserControl x:Class="SSE.CRA.UI.RaceList"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006" 
+             xmlns:d="http://schemas.microsoft.com/expression/blend/2008" 
+             xmlns:local="clr-namespace:SSE.CRA.UI"
+             xmlns:vm="clr-namespace:SSE.CRA.VM"
+             mc:Ignorable="d">
+    <UserControl.Resources>
+        <local:BoolVisibilityConverter x:Key="BoolVisibilityConverter"/>
+    </UserControl.Resources>
+    <DockPanel LastChildFill="True">
+        <Grid DockPanel.Dock="Top">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+            <TextBox Text="{Binding Path=FilterText, UpdateSourceTrigger=PropertyChanged, RelativeSource={RelativeSource AncestorType={x:Type local:RaceList}, Mode=FindAncestor}}" GotFocus="FilterText_GotFocus" LostFocus="FilterText_LostFocus"/>
+            <TextBlock IsEnabled="False" IsHitTestVisible="False" Margin="3,0,0,0" Foreground="Gray" VerticalAlignment="Center" Visibility="{Binding Path=ShowFilterTextOverlay, Converter={StaticResource BoolVisibilityConverter}, RelativeSource={RelativeSource AncestorType={x:Type local:RaceList}, Mode=FindAncestor}}">Search...</TextBlock>
+            <Button Grid.Column="1" Command="{Binding Path=ClearFilterTextCommand, RelativeSource={RelativeSource AncestorType={x:Type local:RaceList}, Mode=FindAncestor}}">Clear</Button>
+        </Grid>
+        <DockPanel DockPanel.Dock="Bottom" LastChildFill="True">
+            <Button DockPanel.Dock="Right"
+                    Visibility="{Binding Path=ShowRefresh, Converter={StaticResource BoolVisibilityConverter}, RelativeSource={RelativeSource AncestorType={x:Type local:RaceList}, Mode=FindAncestor}}"
+                    Command="{Binding Path=RefreshCommand, RelativeSource={RelativeSource AncestorType={x:Type local:RaceList}, Mode=FindAncestor}}">Refresh</Button>
+            <StackPanel Orientation="Horizontal">
+                <CheckBox IsChecked="{Binding Path=OnlyShowConfigured, RelativeSource={RelativeSource AncestorType={x:Type local:RaceList}, Mode=FindAncestor}}">only show configured</CheckBox>
+                <CheckBox IsChecked="{Binding Path=OnlyShowSelected, RelativeSource={RelativeSource AncestorType={x:Type local:RaceList}, Mode=FindAncestor}}">only show selected</CheckBox>
+            </StackPanel>
+        </DockPanel>
+        <ListView ItemsSource="{Binding Path=ItemViewModels, RelativeSource={RelativeSource AncestorType={x:Type local:RaceList}, Mode=FindAncestor}}">
+            <ListView.ItemTemplate>
+                <DataTemplate>
+                    <DockPanel LastChildFill="True">
+                        <CheckBox IsChecked="{Binding Path=IsChecked}"/>
+                        <TextBlock Width="10"/>
+                        <TextBlock Text="{Binding Path=DisplayName}"/>
+                    </DockPanel>
+                </DataTemplate>
+            </ListView.ItemTemplate>
+        </ListView>
+    </DockPanel>
+</UserControl>

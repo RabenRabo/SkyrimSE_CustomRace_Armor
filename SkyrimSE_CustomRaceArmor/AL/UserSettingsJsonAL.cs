@@ -25,7 +25,7 @@ namespace SSE.CRA.AL
         }
         public void Save(UserSettings userSettings)
         {
-            using FileStream? fs = new FileStream(_filename, FileMode.Create, FileAccess.Write, FileShare.Read);
+            using var fs = new FileStream(_filename, FileMode.Create, FileAccess.Write, FileShare.Read);
             JsonSerializer.Serialize(fs, userSettings);
         }
         #endregion

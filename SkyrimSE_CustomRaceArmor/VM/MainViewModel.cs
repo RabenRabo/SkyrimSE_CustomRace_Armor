@@ -4,6 +4,7 @@ using SSE.CRA.AL;
 using SSE.CRA.BL;
 using SSE.CRA.UI;
 using System.IO;
+using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Windows;
@@ -23,12 +24,13 @@ namespace SSE.CRA.VM
         public static readonly SkyrimRelease[] SkyrimVersions = [SkyrimRelease.SkyrimSE, SkyrimRelease.SkyrimSEGog, SkyrimRelease.SkyrimVR];
 
         #region fields
+        private bool _running = false;
         private readonly IUserSettingsAL _userSettingsAL = new UserSettingsJsonAL("Settings.user");
         private readonly Dictionary<SkyrimRelease, VersionUserSettings> _userSettings = [];
         private string _gameDataPath = "";
         private string? _customGameDataPath;
-        private bool _running = false;
         private SkyrimRelease _selectedSkyrimVersion = SkyrimRelease.SkyrimSE;
+        private IEnumerable<RaceViewModel> _racesToBeProcessed = [];
         private bool _showRaceConfiguration = false;
         private RaceViewModel? _selectedRace;
         private string[] _nonWearableArmorRegexes = [@"^(?:dlc\d+\\)?actors\\", @"^(?:dlc\d+\\)?effects\\"];
@@ -38,7 +40,7 @@ namespace SSE.CRA.VM
         private string _maxNewRecords = DefaultMaxNewRecords.ToString();
         private int _maxPluginMastersInt = DefaultMaxPluginMasters;
         private string _maxPluginMasters = DefaultMaxPluginMasters.ToString();
-        private StringBuilder _consoleText = new StringBuilder();
+        private readonly StringBuilder _consoleText = new();
         private ProgressInfoTypes _selectedConsoleLevel = UserSettings.DefaultLogLevel;
         private readonly GeneralSettings _generalSettings;
         #endregion
@@ -86,6 +88,16 @@ namespace SSE.CRA.VM
         }
         public string RaceConfigurationToggleButtonContent => _showRaceConfiguration ? "v" : ">";
         public IEnumerable<RaceViewModel> Races { get; private set; } = [];
+        public IEnumerable<RaceViewModel> RacesToBeProcessed
+        {
+            get => _racesToBeProcessed;
+            set
+            {
+                _racesToBeProcessed = value;
+                RaisePropertyChanged(nameof(RacesToBeProcessed));
+                UpdateEnabled();
+            }
+        }
         public RaceViewModel? SelectedRace
         {
             get => _selectedRace;
@@ -94,11 +106,21 @@ namespace SSE.CRA.VM
                 if (!ReferenceEquals(_selectedRace, value))
                 {
                     _selectedRace = value;
+                    if(value is null)
+                    {
+                        AdditionalRaces = [];
+                    }
+                    else
+                    {
+                        AdditionalRaces = Races.Where(r => !ReferenceEquals(r, value)).ToArray();
+                    }
                     UpdateEnabled();
                     RaisePropertyChanged();
+                    RaisePropertyChanged(nameof(AdditionalRaces));
                 }
             }
         }
+        public IEnumerable<RaceViewModel> AdditionalRaces { get; private set; } = [];
         public string OutputName
         {
             get => _outputName;
@@ -303,17 +325,13 @@ namespace SSE.CRA.VM
                 _customGameDataPath = settings.CustomGameDataPath;
                 OutputName = settings.OutputName ?? DefaultOutputName;
                 FlagESL = settings.FlagESL ?? true;
-                MaxPluginMasters = settings.MaxPluginMasters.ToString() ?? DefaultMaxPluginMasters.ToString();
-                MaxNewRecords = settings.MaxNewRecords.ToString() ?? DefaultMaxNewRecords.ToString();
+                MaxPluginMasters = settings.MaxPluginMasters.HasValue ? settings.MaxPluginMasters.Value.ToString() : DefaultMaxPluginMasters.ToString();
+                MaxNewRecords = settings.MaxNewRecords.HasValue ? settings.MaxNewRecords.Value.ToString() : DefaultMaxNewRecords.ToString();
             }
             RefreshRaces();
             if( settings is not null)
             {
-                foreach(var raceID in settings.SelectedRaces)
-                {
-                    var race = Races.FirstOrDefault(r => r.Model.Main == raceID);
-                    if(race is not null) race.ToBeProcessed = true;
-                }
+                RacesToBeProcessed = Races.Where(r => settings.SelectedRaces.Contains(r.EditorID)).ToArray();
             }
         }
         private void RememberUserSettings()
@@ -348,7 +366,7 @@ namespace SSE.CRA.VM
                 isNotDefault = true;
                 settings.MaxNewRecords = _maxNewRecordsInt;
             }
-            settings.SelectedRaces = Races.Where(r => r.ToBeProcessed).Select(r => r.Model.Main).ToArray();
+            settings.SelectedRaces = RacesToBeProcessed.Select(r => r.EditorID).ToArray();
             isNotDefault = isNotDefault || settings.SelectedRaces.Any();
             if (isNotDefault)
             {
@@ -403,19 +421,17 @@ namespace SSE.CRA.VM
                 PostConsoleMessage(ProgressInfoTypes.Debug, "(re)loading list of custom races");
                 foreach (var race in Races)
                 {
-                    race.PropertyChanged -= Race_PropertyChanged;
                     race.UpdateEnabledRequested -= Race_UpdateEnabledRequested;
                 }
                 using (var modding = new Modding(_selectedSkyrimVersion, GameDataPath))
                 {
                     var result = modding.GetRaces();
-                    Races = result.CustomRaces.Select(r => new RaceViewModel(r)).ToArray();
-                    PostConsoleMessage(ProgressInfoTypes.Debug, $"found {result.CustomRaces.Count()} custom races, {result.VanillaRacesCount} vanilla races, {result.IncompleteRaces} incomplete races");
+                    Races = result.RaceEditorIDs.Select(r => new RaceViewModel(r)).ToArray();
+                    PostConsoleMessage(ProgressInfoTypes.Debug, $"found {result.RaceEditorIDs.Count()} non-vanilla races, {result.VanillaRacesCount} vanilla races");
                 }
                 foreach (var race in Races)
                 {
-                    bool foundRaceSettings = race.TryLoadingRaceSettings();
-                    if (foundRaceSettings)
+                    if (race.TryLoadRaceSettings(RaceSettingsALs, Races))
                     {
                         PostConsoleMessage(ProgressInfoTypes.Trace, $"found and loaded custom race settings for {race.Name}");
                     }
@@ -423,7 +439,6 @@ namespace SSE.CRA.VM
                     {
                         PostConsoleMessage(ProgressInfoTypes.Debug, $"found no custom race settings for {race.Name}");
                     }
-                    race.PropertyChanged += Race_PropertyChanged;
                     race.UpdateEnabledRequested += Race_UpdateEnabledRequested;
                 }
             }
@@ -452,7 +467,7 @@ namespace SSE.CRA.VM
             {
                 InitialDirectory = defDir,
                 Filter = CreateRaceSettingsDialogFilter(),
-                FileName = RaceSettingsALs.FirstOrDefault()?.ConstructFilename(SelectedRace!.Model.Main) ?? "",
+                FileName = RaceSettingsALs.FirstOrDefault()?.ConstructFilename(SelectedRace!.EditorID) ?? "",
                 AddExtension = true,
                 OverwritePrompt = true,
                 Title = "save race settings to file"
@@ -467,19 +482,9 @@ namespace SSE.CRA.VM
                     PostConsoleMessage(ProgressInfoTypes.Error, $"unknown file extension {ext}");
                     return;
                 }
-                var settings = new RaceSettings()
-                {
-                    CustomHead = SelectedRace.HasCustomHeadAA,
-                    CustomBody = SelectedRace.HasCustomBodyAA,
-                    CustomHands = SelectedRace.HasCustomHandsAA,
-                    CustomFeet = SelectedRace.HasCustomFeetAA,
-                    ProcessMale = SelectedRace.ProcessMale,
-                    ProcessFemale = SelectedRace.ProcessFemale,
-                    RegexReplacers = SelectedRace.ReplacerRegexes.Select(rr => new KeyValuePair<string, string>(rr.SearchRegex, rr.ReplaceString)).ToArray()
-                };
                 try
                 {
-                    al.Save(SelectedRace.Model.Main, settings);
+                    SelectedRace.SaveRaceSettings(al);
                 }
                 catch (Exception ex)
                 {
@@ -511,7 +516,7 @@ namespace SSE.CRA.VM
         }
         private bool CanPatch()
         {
-            return OutputNameValid && MaxNewRecordsValid && MaxPluginMastersValid && Races.Any(r => r.ToBeProcessed);
+            return OutputNameValid && MaxNewRecordsValid && MaxPluginMastersValid && RacesToBeProcessed.Any();
         }
         private async Task Patch()
         {
@@ -576,16 +581,17 @@ namespace SSE.CRA.VM
                     {
                         Progress = progress
                     };
-                    processingInfo.Races = Races.Where(r => r.ToBeProcessed).Select(r =>
+                    processingInfo.Races = RacesToBeProcessed.Select(r =>
                         new Modding.ArmorRaceProcessingInfo(
-                            Modding.RaceIDPair.FromEditorIDs(r.Model),
+                            new Modding.RaceID(r.EditorID),
                             r.HasCustomHeadAA,
                             r.HasCustomBodyAA,
                             r.HasCustomHandsAA,
                             r.HasCustomFeetAA,
                             r.ProcessMale,
                             r.ProcessFemale,
-                            r.ReplacerRegexes.Select(rr => new ModelPathRegexInfo(new Regex(rr.SearchRegex, RegexOptions.IgnoreCase), rr.ReplaceString)).ToArray()
+                            r.ReplacerRegexes.Select(rr => new ModelPathRegexInfo(new Regex(rr.SearchRegex, RegexOptions.IgnoreCase), rr.ReplaceString)).ToArray(),
+                            r.AdditionalRaces.Select(ar => new Modding.RaceID(ar.EditorID)).ToArray()
                         )).ToArray();
                     progress.Report(new ProgressInfo(ProgressInfoTypes.Trace, "processing race(s)"));
                     modding.ProcessRaces(processingInfo);
@@ -645,13 +651,6 @@ namespace SSE.CRA.VM
             {
                 PostConsoleMessage(e.Type, e.Message);
             });
-        }
-        private void Race_PropertyChanged(object? sender, System.ComponentModel.PropertyChangedEventArgs e)
-        {
-            if (e.PropertyName == nameof(RaceViewModel.ToBeProcessed))
-            {
-                UpdateEnabled();
-            }
         }
         private void Race_UpdateEnabledRequested(object? sender, EventArgs e)
         {

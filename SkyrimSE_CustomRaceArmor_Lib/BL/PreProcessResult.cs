@@ -157,7 +157,8 @@ namespace SSE.CRA.BL
     {
         #region fields
         public readonly ArmorAddonInfo Owner;
-        public readonly Modding.RaceIDPair Race;
+        public readonly Modding.RaceID Race;
+        public readonly IEnumerable<Modding.RaceID> AdditionalRaces;
         #endregion
 
         #region properties
@@ -166,10 +167,11 @@ namespace SSE.CRA.BL
         #endregion
 
         #region ctors
-        protected ArmorAddonRaceInfo(ArmorAddonInfo owner, Modding.RaceIDPair race)
+        protected ArmorAddonRaceInfo(ArmorAddonInfo owner, Modding.RaceID race, IEnumerable<Modding.RaceID> additionalRaces)
         {
             Owner = owner;
             Race = race;
+            AdditionalRaces = additionalRaces;
         }
         #endregion
 
@@ -194,13 +196,13 @@ namespace SSE.CRA.BL
         #endregion
 
         #region ctors
-        public ArmorAddonRaceNewInfo(ArmorAddonInfo owner, Modding.RaceIDPair race) : base(owner, race) { }
+        public ArmorAddonRaceNewInfo(ArmorAddonInfo owner, Modding.RaceID race, IEnumerable<Modding.RaceID> additionalRaces) : base(owner, race, additionalRaces) { }
         #endregion
 
         #region methods
         public override void Process(Modding.ArmorProcessingInfo processingInfo, SkyrimMod mod)
         {
-            string newEditorID = Race.Main.EditorID + Owner.Original.EditorID;
+            string newEditorID = Race.EditorID + Owner.Original.EditorID;
             ArmorAddon newAA = mod.ArmorAddons.DuplicateInAsNewRecord(Owner.Original, newEditorID, null);
             newAA.EditorID = newEditorID;
             if (Male is not null)
@@ -209,7 +211,7 @@ namespace SSE.CRA.BL
                 string newPath = Male.Regex.Replace(oldPath, Male.Replacer);
                 if (!File.Exists(Path.Combine(processingInfo.GameDataPath, "meshes", newPath)) && processingInfo.MissingModelPaths.Add(newPath))
                 {
-                    processingInfo.Progress?.Report(new ProgressInfo(ProgressInfoTypes.Warning, $"meshes\\{newPath} not found (prev. meshes\\{oldPath})"));
+                    PrintMissingPath(processingInfo.Progress, newPath, oldPath);
                 }
                 newAA.WorldModel!.Male!.File.GivenPath = newPath;
                 if (newAA.FirstPersonModel?.Male?.File.GivenPath == oldPath)
@@ -224,7 +226,7 @@ namespace SSE.CRA.BL
                 string newPath = Female.Regex.Replace(oldPath, Female.Replacer);
                 if (!File.Exists(Path.Combine(processingInfo.GameDataPath, "meshes", newPath)) && processingInfo.MissingModelPaths.Add(newPath))
                 {
-                    processingInfo.Progress?.Report(new ProgressInfo(ProgressInfoTypes.Warning, $"meshes\\{newPath} not found in (prev. meshes\\{oldPath})"));
+                    PrintMissingPath(processingInfo.Progress, newPath, oldPath);
                 }
                 newAA.WorldModel!.Female!.File.GivenPath = newPath;
                 if (newAA.FirstPersonModel?.Female?.File.GivenPath == oldPath)
@@ -233,9 +235,12 @@ namespace SSE.CRA.BL
                 }
             }
             // set Race and AdditionalRaces
-            newAA.Race = Race.Main.Getter!.ToNullableLink();
+            newAA.Race = Race.Getter!.ToNullableLink();
             newAA.AdditionalRaces.Clear();
-            newAA.AdditionalRaces.Add(Race.Vamp.Key);
+            foreach (var addRace in AdditionalRaces)
+            {
+                newAA.AdditionalRaces.Add(addRace.Key);
+            }
 
             // add new ArmorAddon to all armors that use the original one
             foreach (var armorInfo in Owner.Armors)
@@ -245,6 +250,31 @@ namespace SSE.CRA.BL
                     armorInfo.Override = mod.Armors.GetOrAddAsOverride(armorInfo.Original);
                 }
                 armorInfo.Override.Armature.Add(newAA);
+            }
+        }
+        #endregion
+
+        #region methods (helping)
+        private void PrintMissingPath(IProgress<ProgressInfo>? progress, string newPath, string oldPath)
+        {
+            progress?.Report(new ProgressInfo(ProgressInfoTypes.Warning, $"{Owner.Original.FormKey.ModKey.Name}: meshes\\{newPath} not found in (prev. meshes\\{oldPath})"));
+            bool first = true;
+            ProgressInfoTypes level = ProgressInfoTypes.Debug;
+            ArmorInfo? firstArm = Owner.Armors.FirstOrDefault(a => a.Key.ModKey == Owner.Key.ModKey);
+            if (firstArm is not null)
+            {
+                progress?.Report(new ProgressInfo(level, $" --> {firstArm.Key}"));
+                first = false;
+                level = ProgressInfoTypes.Trace;
+            }
+            foreach (var arm in Owner.Armors.Where(a => !ReferenceEquals(a, firstArm)))
+            {
+                progress?.Report(new ProgressInfo(level, $" --> {arm.Key}"));
+                if (first)
+                {
+                    first = false;
+                    level = ProgressInfoTypes.Trace;
+                }
             }
         }
         #endregion
@@ -261,7 +291,7 @@ namespace SSE.CRA.BL
         #endregion
 
         #region ctors
-        public ArmorAddonRaceExtInfo(ArmorAddonInfo owner, Modding.RaceIDPair race) : base(owner, race) { }
+        public ArmorAddonRaceExtInfo(ArmorAddonInfo owner, Modding.RaceID race, IEnumerable<Modding.RaceID> additionalRaces) : base(owner, race, additionalRaces) { }
         #endregion
 
         #region methods
@@ -271,8 +301,11 @@ namespace SSE.CRA.BL
             {
                 Owner.Override = mod.ArmorAddons.GetOrAddAsOverride(Owner.Original);
             }
-            Owner.Override.AdditionalRaces.Add(Race.Main.Key);
-            Owner.Override.AdditionalRaces.Add(Race.Vamp.Key);
+            Owner.Override.AdditionalRaces.Add(Race.Key);
+            foreach (var addRace in AdditionalRaces)
+            {
+                Owner.Override.AdditionalRaces.Add(addRace.Key);
+            }
         }
         #endregion
     }

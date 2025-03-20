@@ -10,8 +10,8 @@
     <Authors>RabenRabo</Authors>
     <Company />
     <Product>Skyrim SE Custom Race Armor</Product>
-    <AssemblyVersion>1.3.0.0</AssemblyVersion>
-    <FileVersion>1.3.0.0</FileVersion>
+    <AssemblyVersion>1.4.0.0</AssemblyVersion>
+    <FileVersion>1.4.0.0</FileVersion>
     <ApplicationIcon>Resources\ArmorPatcher.ico</ApplicationIcon>
   </PropertyGroup>
 

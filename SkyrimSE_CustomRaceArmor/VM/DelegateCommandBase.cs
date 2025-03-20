@@ -2,7 +2,7 @@
 
 namespace SSE.CRA.VM
 {
-    internal abstract class DelegateCommandBase : ICommand
+    public abstract class DelegateCommandBase : ICommand
     {
         #region events
         public event EventHandler? CanExecuteChanged;
@@ -17,7 +17,7 @@ namespace SSE.CRA.VM
         public abstract void Execute(object? parameter);
         #endregion
     }
-    internal class DelegateCommand : DelegateCommandBase
+    public class DelegateCommand : DelegateCommandBase
     {
         #region fields
         private readonly Action _execute;
@@ -44,7 +44,7 @@ namespace SSE.CRA.VM
         #endregion
     }
 
-    internal class AsyncDelegateCommand : DelegateCommandBase
+    public class AsyncDelegateCommand : DelegateCommandBase
     {
         #region fields
         private readonly Func<Task> _execute;

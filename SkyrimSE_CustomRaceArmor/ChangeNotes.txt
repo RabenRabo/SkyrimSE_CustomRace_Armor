@@ -1,4 +1,11 @@
-﻿Version 1.3.0
+﻿Version 1.4.0
+Added filter/search option to race list
+Added AdditionalRaces to race configurations (these will be processed same as the selected race) which replaces the fixed main/vampire race pair (which didn't not work for custom races without vampire equivalent)
+Added aaDraiVampire to AdditonalRaces of aaDrai
+Changed UI layout to prevent Window growing stupidly long
+Debug/Trace level will now report first/all armor using a missing mesh
+
+Version 1.3.0
 Patcher now remembers log level, and user settings for each skyrim version
 Added browse/reset button for custom game data path.
 

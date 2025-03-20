@@ -1,109 +1,110 @@
 ﻿using SSE.CRA.AL;
 using System.Collections.ObjectModel;
-using static SSE.CRA.BL.Modding;
 
 namespace SSE.CRA.VM
 {
-    internal class RaceViewModel : BaseViewModel
+    public class RaceViewModel : BaseViewModel, IEquatable<RaceViewModel>
     {
         #region fields
-        public readonly RaceEditorIDPair Model;
+        public readonly string EditorID;
         private bool _toBeProcessed;
-        private bool _hasCustomHeadAA = false;
-        private bool _hasCustomBodyAA = true;
-        private bool _hasCustomHandsAA = false;
-        private bool _hasCustomFeetAA = true;
-        private bool _processMale = false;
-        private bool _processFemale = true;
+        private RaceSettings? _settings;
         private readonly ObservableCollection<ReplacerRegexViewModel> _replacerRegexes = [];
         private ReplacerRegexViewModel? _selectedReplacerRegex;
+        private IEnumerable<RaceViewModel> _additionalRaces = [];
         #endregion
 
         #region properties
-        public bool ToBeProcessed
+        public RaceSettings? Settings
         {
-            get => _toBeProcessed;
-            set
+            get => _settings;
+            private set
             {
-                if (_toBeProcessed != value)
+                if (_settings != value)
                 {
-                    _toBeProcessed = value;
+                    _settings = value;
                     RaisePropertyChanged();
                 }
             }
         }
         public string Name
         {
-            get => Model.Main;
+            get => EditorID;
         }
         public bool HasCustomHeadAA
         {
-            get => _hasCustomHeadAA;
+            get => Settings?.CustomHead ?? false;
             set
             {
-                if (_hasCustomHeadAA != value)
+                if (HasCustomHeadAA != value)
                 {
-                    _hasCustomHeadAA = value;
+                    Settings ??= CreateSettings();
+                    Settings.CustomHead = value;
                     RaisePropertyChanged();
                 }
             }
         }
         public bool HasCustomBodyAA
         {
-            get => _hasCustomBodyAA;
+            get => Settings?.CustomBody ?? true;
             set
             {
-                if (_hasCustomBodyAA != value)
+                if (HasCustomBodyAA != value)
                 {
-                    _hasCustomBodyAA = value;
+                    Settings ??= CreateSettings();
+                    Settings.CustomBody = value;
                     RaisePropertyChanged();
                 }
             }
         }
         public bool HasCustomHandsAA
         {
-            get => _hasCustomHandsAA;
+            get => Settings?.CustomHands ?? false;
             set
             {
-                if (_hasCustomHandsAA != value)
+                if (HasCustomHandsAA != value)
                 {
-                    _hasCustomHandsAA = value;
+                    Settings ??= CreateSettings();
+                    Settings.CustomHands = value;
                     RaisePropertyChanged();
                 }
             }
         }
         public bool HasCustomFeetAA
         {
-            get => _hasCustomFeetAA;
+            get => Settings?.CustomFeet ?? true;
             set
             {
-                if (_hasCustomFeetAA != value)
+                if (HasCustomFeetAA != value)
                 {
-                    _hasCustomFeetAA = value;
+                    Settings ??= CreateSettings();
+                    Settings.CustomFeet = value;
                     RaisePropertyChanged();
                 }
             }
         }
         public bool ProcessMale
         {
-            get => _processMale;
+            get => Settings?.ProcessMale ?? true;
             set
             {
-                if (_processMale != value)
+                if (ProcessMale != value)
                 {
-                    _processMale = value;
+                    Settings ??= CreateSettings();
+                    Settings.ProcessMale = value;
                     RaisePropertyChanged();
                 }
             }
         }
         public bool ProcessFemale
         {
-            get => _processFemale;
+            get => Settings?.ProcessFemale ?? true;
             set
             {
-                if (_processFemale != value)
+                if (ProcessFemale != value)
                 {
-                    _processFemale = value;
+                    Settings ??= CreateSettings();
+                    Settings.ProcessFemale = value;
                     RaisePropertyChanged();
                 }
             }
@@ -121,6 +122,17 @@ namespace SSE.CRA.VM
                 }
             }
         }
+        public IEnumerable<RaceViewModel> AdditionalRaces
+        {
+            get => _additionalRaces;
+            set
+            {
+                Settings ??= CreateSettings();
+                _additionalRaces = value;
+                Settings.AdditionalRaces = [.. value.Select(ar => ar.EditorID)];
+                RaisePropertyChanged();
+            }
+        }
         public DelegateCommandBase MoveReplacerRegexUpCommand { get; private set; }
         public DelegateCommandBase MoveReplacerRegexDownCommand { get; private set; }
         #endregion
@@ -130,9 +142,9 @@ namespace SSE.CRA.VM
         #endregion
 
         #region ctors
-        public RaceViewModel(RaceEditorIDPair model)
+        public RaceViewModel(string editorID)
         {
-            Model = model;
+            EditorID = editorID;
             MoveReplacerRegexUpCommand = new DelegateCommand(MoveReplacerRegexUp, CanMoveReplacerRegexUp);
             MoveReplacerRegexDownCommand = new DelegateCommand(MoveReplacerRegexDown, CanMoveReplacerRegexDown);
             var rr = new ReplacerRegexViewModel() { SearchRegex = "(.+)", ReplaceString = "Patched\\$1" };
@@ -142,39 +154,77 @@ namespace SSE.CRA.VM
         #endregion
 
         #region methods
-        public bool TryLoadingRaceSettings()
+        public bool TryLoadRaceSettings(IEnumerable<IRaceSettingsAL> raceSettingsALs, IEnumerable<RaceViewModel> allRaces)
         {
             IRaceSettingsAL? raceSettingsAL = null;
-            foreach (var al in MainViewModel.RaceSettingsALs)
+            foreach (var al in raceSettingsALs)
             {
-                if (al.Exists(Model.Main))
+                if (al.Exists(EditorID))
                 {
                     raceSettingsAL = al;
                     break;
                 }
             }
             if (raceSettingsAL is null) return false;
-            RaceSettings settings = raceSettingsAL.Load(Model.Main);
-            HasCustomHeadAA = settings.CustomHead;
-            HasCustomBodyAA = settings.CustomBody;
-            HasCustomHandsAA = settings.CustomHands;
-            HasCustomFeetAA = settings.CustomFeet;
-            ProcessMale = settings.ProcessMale;
-            ProcessFemale = settings.ProcessFemale;
+            Settings = raceSettingsAL.Load(EditorID);
+            _replacerRegexes.CollectionChanged -= ReplacerRegexes_CollectionChanged;
             _replacerRegexes.Clear();
-            foreach (var rr in settings.RegexReplacers)
+            foreach (var rr in Settings.RegexReplacers)
             {
-                _replacerRegexes.Add(new ReplacerRegexViewModel() { SearchRegex = rr.Key, ReplaceString = rr.Value });
+                var rrvm = new ReplacerRegexViewModel() { SearchRegex = rr.Key, ReplaceString = rr.Value };
+                rrvm.PropertyChanged += ReplacerRegex_PropertyChanged;
+                _replacerRegexes.Add(rrvm);
             }
+            _replacerRegexes.CollectionChanged += ReplacerRegexes_CollectionChanged;
+            ReplacerRegexes_CollectionChanged(_replacerRegexes, new System.Collections.Specialized.NotifyCollectionChangedEventArgs(System.Collections.Specialized.NotifyCollectionChangedAction.Reset));
+            List<RaceViewModel> addRaces = [];
+            foreach(var addRace in Settings.AdditionalRaces)
+            {
+                RaceViewModel? vm = allRaces.FirstOrDefault(r => r.EditorID == addRace);
+                if(vm is not null) addRaces.Add(vm);
+            }
+            _additionalRaces = addRaces;
+            RaisePropertyChanged(nameof(AdditionalRaces));
             return true;
+        }
+        public void SaveRaceSettings(IRaceSettingsAL raceSettingsAL)
+        {
+            Settings ??= CreateSettings();
+            raceSettingsAL.Save(EditorID, Settings);
         }
         public override string ToString()
         {
             return Name;
         }
+        public bool Equals(RaceViewModel? other)
+        {
+            return other is not null && EditorID == other.EditorID;
+        }
+        public override bool Equals(object? obj)
+        {
+            return obj is RaceViewModel other && EditorID == other.EditorID;
+        }
+        public override int GetHashCode()
+        {
+            return EditorID.GetHashCode();
+        }
         #endregion
 
         #region methods (helping)
+        private RaceSettings CreateSettings()
+        {
+            return new RaceSettings()
+            {
+                CustomHead = HasCustomHeadAA,
+                CustomBody = HasCustomBodyAA,
+                CustomHands = HasCustomHandsAA,
+                CustomFeet = HasCustomFeetAA,
+                ProcessMale = ProcessMale,
+                ProcessFemale = ProcessFemale,
+                RegexReplacers = [.. ReplacerRegexes.Select(rr => new KeyValuePair<string, string>(rr.SearchRegex, rr.ReplaceString))],
+                AdditionalRaces = [.. AdditionalRaces.Select(ar => ar.EditorID)]
+            };
+        }
         private void UpdateEnabled()
         {
             MoveReplacerRegexDownCommand.RaiseCanExecuteChanged();
@@ -222,6 +272,8 @@ namespace SSE.CRA.VM
                     break;
             }
             ReindexRegexReplacers();
+            Settings ??= CreateSettings();
+            Settings.RegexReplacers = [.. ReplacerRegexes.Select(rr => new KeyValuePair<string, string>(rr.SearchRegex, rr.ReplaceString))];
         }
         public void ReindexRegexReplacers()
         {

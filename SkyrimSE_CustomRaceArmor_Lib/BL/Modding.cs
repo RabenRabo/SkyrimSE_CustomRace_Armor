@@ -37,44 +37,20 @@ namespace SSE.CRA.BL
         /// <returns></returns>
         public CustomRacesResult GetRaces()
         {
-            Dictionary<string, RaceInfo> res = [];
+            HashSet<string> res = [];
+            int vanilla = 0;
             foreach (var raceGetter in _environment.LoadOrder.PriorityOrder.OnlyEnabled().Race().WinningOverrides())
             {
                 // skip if no EditorID (?!)
                 if (raceGetter.EditorID is null) continue;
-                string mainEditorID;
-                bool isVamp;
-                // check if vampire race
-                if (raceGetter.EditorID.EndsWith("Vampire"))
-                {
-                    mainEditorID = raceGetter.EditorID[..^"Vampire".Length];
-                    isVamp = true;
-                }
-                else
-                {
-                    mainEditorID = raceGetter.EditorID;
-                    isVamp = false;
-                }
-                // save in result
-                if (!res.TryGetValue(mainEditorID, out var info))
-                {
-                    info = new RaceInfo();
-                    info.ModKey = raceGetter.FormKey.ModKey;
-                    res.Add(mainEditorID, info);
-                }
-                if (isVamp)
-                {
-                    info.VampEditorID = raceGetter.EditorID;
-                }
-                else
-                {
-                    info.EditorID = raceGetter.EditorID;
-                }
+                // count vanilla races / collect non-vanilla
+                if(raceGetter.FormKey.ModKey == Skyrim.ModKey || raceGetter.FormKey.ModKey == Dawnguard.ModKey || raceGetter.FormKey.ModKey == Dragonborn.ModKey) vanilla++;
+                else res.Add(raceGetter.EditorID);
             }
-            return new(res.Values.Where(r => !r.IsIncomplete && !r.IsVanilla).Select(r => new RaceEditorIDPair(r.EditorID!, r.VampEditorID!)).ToArray(), res.Values.Count(r => r.IsVanilla), res.Values.Count(r => r.IsIncomplete));
+            return new(res, vanilla);
         }
         /// <summary>
-        /// Removes ArmorRace from race and raceVampire, and updates Race and AdditionalRaces of naked skin
+        /// Removes ArmorRace from race and its additional races, and updates Race and AdditionalRaces of naked skin
         /// </summary>
         /// <param name="processingInfo"></param>
         /// <param name="target"></param>
@@ -83,23 +59,30 @@ namespace SSE.CRA.BL
             var mod = processingInfo.GetMod();
             foreach (var raceInfo in processingInfo.Races)
             {
-                raceInfo.Race.Main.Getter = GetRace(raceInfo.Race.Main.EditorID);
-                raceInfo.Race.Vamp.Getter = GetRace(raceInfo.Race.Vamp.EditorID);
-                // set ArmorRace of race/vamp to None (as opposed to DefaultRace)
-                Race ovRace = mod.Races.GetOrAddAsOverride(raceInfo.Race.Main.Getter);
+                raceInfo.Race.Getter = GetRace(raceInfo.Race.EditorID);
+                // set ArmorRace of race to None (as opposed to DefaultRace)
+                Race ovRace = mod.Races.GetOrAddAsOverride(raceInfo.Race.Getter);
                 ovRace.ArmorRace.Clear();
-                Race ovVamp = mod.Races.GetOrAddAsOverride(raceInfo.Race.Vamp.Getter);
-                ovVamp.ArmorRace.Clear();
+                foreach (var addRace in raceInfo.AdditionalRaces)
+                {
+                    addRace.Getter = GetRace(addRace.EditorID);
+                    // set ArmorRace of race to None (as opposed to DefaultRace)
+                    ovRace = mod.Races.GetOrAddAsOverride(addRace.Getter);
+                    ovRace.ArmorRace.Clear();
+                }
                 // change race of skin armor
-                IArmorGetter skinArmor = raceInfo.Race.Main.Getter.Skin.Resolve(_environment.LinkCache);
+                IArmorGetter skinArmor = raceInfo.Race.Getter.Skin.Resolve(_environment.LinkCache);
                 foreach (IArmorAddonGetter armature in skinArmor.Armature.Select(a => a.Resolve(_environment.LinkCache)))
                 {
                     if (CheckIfNakedSkinArmature(armature, raceInfo))
                     {
                         ArmorAddon aa = mod.ArmorAddons.GetOrAddAsOverride(armature);
-                        aa.Race = raceInfo.Race.Main.Getter.ToNullableLink();
+                        aa.Race = raceInfo.Race.Getter.ToNullableLink();
                         aa.AdditionalRaces.Clear();
-                        aa.AdditionalRaces.Add(raceInfo.Race.Vamp.Key);
+                        foreach(var addRace in raceInfo.AdditionalRaces)
+                        {
+                            aa.AdditionalRaces.Add(addRace.Key);
+                        }
                     }
                 }
             }
@@ -145,11 +128,10 @@ namespace SSE.CRA.BL
                         armorInfo.ArmorAddonKeys.Add(aa.FormKey);
                         armorAddonInfo.Armors.Add(armorInfo);
                         // check if ArmorAddon was already marked for processing by a previous Armor
-                        if (armorAddonInfo.Races.TryGetValue(raceInfo.Race.Main.Key, out ArmorAddonRaceInfo? aaRaceInfo)) continue;
-
+                        if (armorAddonInfo.Races.TryGetValue(raceInfo.Race.Key, out ArmorAddonRaceInfo? aaRaceInfo)) continue;
                         if (raceInfo.CheckIfNeedsCustomArmature(aa, out ModelPathRegexInfo? maleRegex, out ModelPathRegexInfo? femaleRegex))
                         {
-                            aaRaceInfo = new ArmorAddonRaceNewInfo(armorAddonInfo, raceInfo.Race)
+                            aaRaceInfo = new ArmorAddonRaceNewInfo(armorAddonInfo, raceInfo.Race, raceInfo.AdditionalRaces)
                             {
                                 Male = maleRegex,
                                 Female = femaleRegex,
@@ -157,9 +139,9 @@ namespace SSE.CRA.BL
                         }
                         else
                         {
-                            aaRaceInfo = new ArmorAddonRaceExtInfo(armorAddonInfo, raceInfo.Race);
+                            aaRaceInfo = new ArmorAddonRaceExtInfo(armorAddonInfo, raceInfo.Race, raceInfo.AdditionalRaces);
                         }
-                        armorAddonInfo.Races.Add(raceInfo.Race.Main.Key, aaRaceInfo);
+                        armorAddonInfo.Races.Add(raceInfo.Race.Key, aaRaceInfo);
                     }
                 }
             }
@@ -204,7 +186,8 @@ namespace SSE.CRA.BL
         }
         private bool CheckIfNakedSkinArmature(IArmorAddonGetter aa, ArmorRaceProcessingInfo raceInfo)
         {
-            return aa.Race.FormKey == Skyrim.Race.DefaultRace.FormKey && aa.AdditionalRaces.Count == 2 && aa.AdditionalRaces.Contains(raceInfo.Race.Main.Key) && aa.AdditionalRaces.Contains(raceInfo.Race.Vamp.Key);
+            // check if ArmorAddon.Race is set to DefaultRace and ArmorAddon.AdditionalRaces contains the given race and its additional races
+            return aa.Race.FormKey == Skyrim.Race.DefaultRace.FormKey && aa.AdditionalRaces.Count == 1 + raceInfo.AdditionalRaces.Count() && aa.AdditionalRaces.Contains(raceInfo.Race.Key) && raceInfo.AdditionalRaces.All(ar => aa.AdditionalRaces.Contains(ar.Key));
         }
         private bool CheckIfWearableArmor(IArmorGetter armorGetter)
         {
@@ -212,16 +195,6 @@ namespace SSE.CRA.BL
         }
         #endregion
 
-        private class RaceInfo
-        {
-            #region properties
-            public ModKey ModKey { get; set; }
-            public string? EditorID { get; set; }
-            public string? VampEditorID { get; set; }
-            public bool IsVanilla => ModKey == Skyrim.ModKey || ModKey == Dawnguard.ModKey || ModKey == Dragonborn.ModKey;
-            public bool IsIncomplete => EditorID is null || VampEditorID is null;
-            #endregion
-        }
         public class ArmorProcessingInfo
         {
             #region fields
@@ -331,7 +304,7 @@ namespace SSE.CRA.BL
         public class ArmorRaceProcessingInfo
         {
             #region fields
-            public readonly RaceIDPair Race;
+            public readonly RaceID Race;
             public readonly bool CustomHead;
             public readonly bool CustomBody;
             public readonly bool CustomHands;
@@ -339,10 +312,11 @@ namespace SSE.CRA.BL
             public readonly bool ProcessMale;
             public readonly bool ProcessFemale;
             public readonly IEnumerable<ModelPathRegexInfo> ModelPathReplacers;
+            public readonly IEnumerable<RaceID> AdditionalRaces;
             #endregion
 
             #region ctors
-            public ArmorRaceProcessingInfo(RaceIDPair race, bool customHead, bool customBody, bool customHands, bool customFeet, bool procMale, bool procFemale, IEnumerable<ModelPathRegexInfo> modelPathReplacers)
+            public ArmorRaceProcessingInfo(RaceID race, bool customHead, bool customBody, bool customHands, bool customFeet, bool procMale, bool procFemale, IEnumerable<ModelPathRegexInfo> modelPathReplacers, IEnumerable<RaceID> additionalRaces)
             {
                 Race = race;
                 CustomHead = customHead;
@@ -352,6 +326,7 @@ namespace SSE.CRA.BL
                 ProcessMale = procMale;
                 ProcessFemale = procFemale;
                 ModelPathReplacers = modelPathReplacers;
+                AdditionalRaces = additionalRaces;
             }
             #endregion
 
@@ -404,35 +379,11 @@ namespace SSE.CRA.BL
             #endregion
         }
 
-        public readonly struct CustomRacesResult(IEnumerable<RaceEditorIDPair> customRaces, int vanillaRacesCount, int incompleteRaces)
+        public readonly struct CustomRacesResult(IEnumerable<string> raceEditorIDs, int vanillaRacesCount)
         {
             #region fields
-            public readonly IEnumerable<RaceEditorIDPair> CustomRaces = customRaces;
+            public readonly IEnumerable<string> RaceEditorIDs = raceEditorIDs;
             public readonly int VanillaRacesCount = vanillaRacesCount;
-            public readonly int IncompleteRaces = incompleteRaces;
-            #endregion
-        }
-
-        public readonly struct RaceEditorIDPair(string main, string vamp)
-        {
-            #region fields
-            public readonly string Main = main;
-            public readonly string Vamp = vamp;
-            #endregion
-        }
-
-        public readonly struct RaceIDPair(RaceID main, RaceID vamp)
-        {
-            #region fields
-            public readonly RaceID Main = main;
-            public readonly RaceID Vamp = vamp;
-            #endregion
-
-            #region methods
-            public static RaceIDPair FromEditorIDs(RaceEditorIDPair pair)
-            {
-                return new RaceIDPair(new RaceID(pair.Main), new RaceID(pair.Vamp));
-            }
             #endregion
         }
 
