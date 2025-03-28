@@ -22,6 +22,7 @@
         Debug,
         Info,
         Warning,
-        Error
+        Error,
+        Critical
     }
 }

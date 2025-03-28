@@ -10,7 +10,10 @@ namespace SSE.CRA.BL
         #region fields
         public readonly Dictionary<FormKey, ArmorInfo> Armors = [];
         public readonly Dictionary<FormKey, ArmorAddonInfo> ArmorAddons = [];
-        public HashSet<FormKey> Races = [];
+        #endregion
+
+        #region properties
+        public int ErrorCount { get; set; } = 0;
         #endregion
 
         #region methods

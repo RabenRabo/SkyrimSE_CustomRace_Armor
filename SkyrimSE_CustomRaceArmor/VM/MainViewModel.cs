@@ -4,7 +4,6 @@ using SSE.CRA.AL;
 using SSE.CRA.BL;
 using SSE.CRA.UI;
 using System.IO;
-using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
 using System.Windows;
@@ -18,7 +17,7 @@ namespace SSE.CRA.VM
         private const int DefaultMaxPluginMasters = 200;
         private const int DefaultMaxNewRecords = 2000;
 
-        public static readonly IEnumerable<IRaceSettingsAL> RaceSettingsALs = [new RaceSettingsJsonAL() { Directory = MainViewModel.RaceSettingsDefaultDirectory }];
+        public static readonly IEnumerable<IRaceSettingsAL> RaceSettingsALs = [new RaceSettingsJsonAL() { Directory = RaceSettingsDefaultDirectory }];
         public const string RaceSettingsDefaultDirectory = "RaceSettings";
         public const string GeneralSettingsDefaultFile = "GeneralSettings.json";
         public static readonly SkyrimRelease[] SkyrimVersions = [SkyrimRelease.SkyrimSE, SkyrimRelease.SkyrimSEGog, SkyrimRelease.SkyrimVR];
@@ -33,13 +32,13 @@ namespace SSE.CRA.VM
         private IEnumerable<RaceViewModel> _racesToBeProcessed = [];
         private bool _showRaceConfiguration = false;
         private RaceViewModel? _selectedRace;
-        private string[] _nonWearableArmorRegexes = [@"^(?:dlc\d+\\)?actors\\", @"^(?:dlc\d+\\)?effects\\"];
         private string _outputName = DefaultOutputName;
         private bool _flagESL = DefaultFlagESL;
         private int _maxNewRecordsInt = DefaultMaxNewRecords;
         private string _maxNewRecords = DefaultMaxNewRecords.ToString();
         private int _maxPluginMastersInt = DefaultMaxPluginMasters;
         private string _maxPluginMasters = DefaultMaxPluginMasters.ToString();
+        private bool _skipErrors = false;
         private readonly StringBuilder _consoleText = new();
         private ProgressInfoTypes _selectedConsoleLevel = UserSettings.DefaultLogLevel;
         private readonly GeneralSettings _generalSettings;
@@ -87,7 +86,8 @@ namespace SSE.CRA.VM
             }
         }
         public string RaceConfigurationToggleButtonContent => _showRaceConfiguration ? "v" : ">";
-        public IEnumerable<RaceViewModel> Races { get; private set; } = [];
+        public IEnumerable<RaceViewModel> NonVanillaRaces { get; private set; } = [];
+        public IEnumerable<RaceViewModel> VanillaRaces { get; private set; } = [];
         public IEnumerable<RaceViewModel> RacesToBeProcessed
         {
             get => _racesToBeProcessed;
@@ -106,13 +106,13 @@ namespace SSE.CRA.VM
                 if (!ReferenceEquals(_selectedRace, value))
                 {
                     _selectedRace = value;
-                    if(value is null)
+                    if (value is null)
                     {
                         AdditionalRaces = [];
                     }
                     else
                     {
-                        AdditionalRaces = Races.Where(r => !ReferenceEquals(r, value)).ToArray();
+                        AdditionalRaces = NonVanillaRaces.Where(r => !ReferenceEquals(r, value)).ToArray();
                     }
                     UpdateEnabled();
                     RaisePropertyChanged();
@@ -194,6 +194,18 @@ namespace SSE.CRA.VM
             }
         }
         public bool MaxPluginMastersValid => _maxPluginMastersInt > 0 && _maxPluginMastersInt <= 254;
+        public bool SkipErrors
+        {
+            get => _skipErrors;
+            set
+            {
+                if (_skipErrors != value)
+                {
+                    _skipErrors = value;
+                    RaisePropertyChanged();
+                }
+            }
+        }
         public IEnumerable<ProgressInfoTypes> ConsoleLevelItems => Enum.GetValues(typeof(ProgressInfoTypes)).Cast<ProgressInfoTypes>();
         public ProgressInfoTypes SelectedConsoleLevel
         {
@@ -255,7 +267,7 @@ namespace SSE.CRA.VM
             RememberUserSettings();
             try
             {
-                _userSettingsAL.Save(new UserSettings() { LogLevel = SelectedConsoleLevel, SettingsForVersions = _userSettings.Values.ToArray() });
+                _userSettingsAL.Save(new UserSettings() { LogLevel = SelectedConsoleLevel, SettingsForVersions = [.. _userSettings.Values] });
             }
             catch (Exception ex)
             {
@@ -312,7 +324,7 @@ namespace SSE.CRA.VM
         }
         private void ApplyUserSettings()
         {
-            if(!_userSettings.TryGetValue(SelectedSkyrimVersion, out var settings))
+            if (!_userSettings.TryGetValue(SelectedSkyrimVersion, out var settings))
             {
                 _customGameDataPath = null;
                 OutputName = DefaultOutputName;
@@ -329,9 +341,9 @@ namespace SSE.CRA.VM
                 MaxNewRecords = settings.MaxNewRecords.HasValue ? settings.MaxNewRecords.Value.ToString() : DefaultMaxNewRecords.ToString();
             }
             RefreshRaces();
-            if( settings is not null)
+            if (settings is not null)
             {
-                RacesToBeProcessed = Races.Where(r => settings.SelectedRaces.Contains(r.EditorID)).ToArray();
+                RacesToBeProcessed = NonVanillaRaces.Where(r => settings.SelectedRaces.Contains(r.EditorID)).ToArray();
             }
         }
         private void RememberUserSettings()
@@ -341,17 +353,17 @@ namespace SSE.CRA.VM
             {
                 Version = SelectedSkyrimVersion
             };
-            if(_customGameDataPath is not null)
+            if (_customGameDataPath is not null)
             {
-                isNotDefault  = true;
+                isNotDefault = true;
                 settings.CustomGameDataPath = _customGameDataPath;
             }
-            if(OutputName != DefaultOutputName)
+            if (OutputName != DefaultOutputName)
             {
                 isNotDefault = true;
                 settings.OutputName = OutputName;
             }
-            if(FlagESL != DefaultFlagESL)
+            if (FlagESL != DefaultFlagESL)
             {
                 isNotDefault = true;
                 settings.FlagESL = FlagESL;
@@ -385,11 +397,11 @@ namespace SSE.CRA.VM
             {
                 Title = "Select Game Data folder"
             };
-            if(_customGameDataPath is not null) dlg.InitialDirectory = _customGameDataPath;
-            else if(!string.IsNullOrEmpty(_gameDataPath)) dlg.InitialDirectory = _gameDataPath;
-            if(dlg.ShowDialog(Application.Current.MainWindow) == true)
+            if (_customGameDataPath is not null) dlg.InitialDirectory = _customGameDataPath;
+            else if (!string.IsNullOrEmpty(_gameDataPath)) dlg.InitialDirectory = _gameDataPath;
+            if (dlg.ShowDialog(Application.Current.MainWindow) == true)
             {
-                if(ComparePaths(dlg.FolderName, _gameDataPath))
+                if (ComparePaths(dlg.FolderName, _gameDataPath))
                 {
                     _customGameDataPath = null;
                 }
@@ -419,19 +431,20 @@ namespace SSE.CRA.VM
             try
             {
                 PostConsoleMessage(ProgressInfoTypes.Debug, "(re)loading list of custom races");
-                foreach (var race in Races)
+                foreach (var race in NonVanillaRaces)
                 {
                     race.UpdateEnabledRequested -= Race_UpdateEnabledRequested;
                 }
                 using (var modding = new Modding(_selectedSkyrimVersion, GameDataPath))
                 {
                     var result = modding.GetRaces();
-                    Races = result.RaceEditorIDs.Select(r => new RaceViewModel(r)).ToArray();
-                    PostConsoleMessage(ProgressInfoTypes.Debug, $"found {result.RaceEditorIDs.Count()} non-vanilla races, {result.VanillaRacesCount} vanilla races");
+                    VanillaRaces = result.VanillaRaceEditorIDs.Select(r => new RaceViewModel(r, [])).ToArray();
+                    NonVanillaRaces = result.NonVanillaRaceEditorIDs.Select(r => new RaceViewModel(r, VanillaRaces)).ToArray();
+                    PostConsoleMessage(ProgressInfoTypes.Info, $"found {result.NonVanillaRaceEditorIDs.Count()} non-vanilla races, {result.VanillaRaceEditorIDs.Count()} vanilla races");
                 }
-                foreach (var race in Races)
+                foreach (var race in NonVanillaRaces)
                 {
-                    if (race.TryLoadRaceSettings(RaceSettingsALs, Races))
+                    if (race.TryLoadRaceSettings(RaceSettingsALs, NonVanillaRaces, VanillaRaces))
                     {
                         PostConsoleMessage(ProgressInfoTypes.Trace, $"found and loaded custom race settings for {race.Name}");
                     }
@@ -442,13 +455,15 @@ namespace SSE.CRA.VM
                     race.UpdateEnabledRequested += Race_UpdateEnabledRequested;
                 }
             }
-            catch(Exception ex)
+            catch (Exception ex)
             {
-                Races = [];
+                NonVanillaRaces = [];
+                VanillaRaces = [];
                 PostConsoleMessage(ProgressInfoTypes.Error, $"unable to refresh races: {ex.Message}");
             }
             RaisePropertyChanged(nameof(GameDataPath));
-            RaisePropertyChanged(nameof(Races));
+            RaisePropertyChanged(nameof(NonVanillaRaces));
+            RaisePropertyChanged(nameof(VanillaRaces));
             UpdateEnabled();
         }
         private bool CanSaveRaceSettings()
@@ -575,8 +590,8 @@ namespace SSE.CRA.VM
                         FlagESL,
                         _maxPluginMastersInt,
                         _maxNewRecordsInt,
-                        _generalSettings,
-                        _nonWearableArmorRegexes.Select(nar => new Regex(nar, RegexOptions.IgnoreCase)).ToArray()
+                        SkipErrors,
+                        _generalSettings
                     )
                     {
                         Progress = progress
@@ -591,7 +606,8 @@ namespace SSE.CRA.VM
                             r.ProcessMale,
                             r.ProcessFemale,
                             r.ReplacerRegexes.Select(rr => new ModelPathRegexInfo(new Regex(rr.SearchRegex, RegexOptions.IgnoreCase), rr.ReplaceString)).ToArray(),
-                            r.AdditionalRaces.Select(ar => new Modding.RaceID(ar.EditorID)).ToArray()
+                            r.AdditionalRaces.Select(ar => new Modding.RaceID(ar.EditorID)).ToArray(),
+                            modding.GetRaceFormKeys(r.CompatibleArmorRaces.Select(cr => cr.EditorID))
                         )).ToArray();
                     progress.Report(new ProgressInfo(ProgressInfoTypes.Trace, "processing race(s)"));
                     modding.ProcessRaces(processingInfo);
@@ -603,6 +619,7 @@ namespace SSE.CRA.VM
                     var result = modding.ProcessArmor(processingInfo, preProcessResult);
                     progress.Report(new ProgressInfo(ProgressInfoTypes.Info, $"processed {result.ArmorCount} armor (overrode {result.OverriddenAACount} ArmorAddons, created {result.NewAACount} new ones, missing {result.MissingPathCount} models)"));
                     progress.Report(new ProgressInfo(ProgressInfoTypes.Info, $"created {result.CreatedFiles.Count()} files"));
+                    if(processingInfo.SkipErrors && preProcessResult.ErrorCount > 0) progress.Report(new ProgressInfo(ProgressInfoTypes.Warning, $"skipped {preProcessResult.ErrorCount} errors"));
                     foreach (var file in result.CreatedFiles)
                     {
                         progress.Report(new ProgressInfo(ProgressInfoTypes.Info, $"-> {file}"));
@@ -610,7 +627,7 @@ namespace SSE.CRA.VM
                 }
                 catch (Exception ex)
                 {
-                    progress.Report(new ProgressInfo(ProgressInfoTypes.Error, $"patch process aborted: {ex}"));
+                    progress.Report(new ProgressInfo(ProgressInfoTypes.Critical, $"patch process aborted: {ex}"));
                 }
                 finally
                 {

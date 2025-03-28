@@ -27,6 +27,7 @@
         public bool ProcessFemale { get; set; }
         public KeyValuePair<string, string>[] RegexReplacers { get; set; } = [];
         public string[] AdditionalRaces { get; set; } = [];
+        public string[] CompatibleArmorRaces { get; set; } = [];
         #endregion
     }
 }

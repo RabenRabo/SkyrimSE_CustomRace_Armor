@@ -20,7 +20,7 @@
         <clr:String x:Key="NewAATip">Creates a new ArmorAddons for the specified body part for the custom race. The new AA will use a new model path based on the first matching regex replacer below.</clr:String>
     </Window.Resources>
     <UniformGrid Columns="2" Margin="5">
-        <Grid x:Name="gridSettings">
+        <Grid IsEnabled="{Binding Path=Running, Converter={StaticResource BoolInverterConverter}}">
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="Auto"/>
@@ -43,7 +43,7 @@
                 <Button Grid.Column="2" Grid.Row="1" Command="{Binding Path=ResetGameDataPathCommand}">Reset</Button>
             </Grid>
             <GroupBox Grid.Row="1" Header="Select races to process">
-                <local:RaceList Height="150" ItemsSource="{Binding Path=Races}" SelectedItems="{Binding Path=RacesToBeProcessed}" RefreshCommand="{Binding Path=RefreshRacesCommand}" OnlyShowConfigured="True" ShowRefresh="True"/>
+                <local:RaceList Height="150" ItemsSource="{Binding Path=NonVanillaRaces}" SelectedItems="{Binding Path=RacesToBeProcessed}" RefreshCommand="{Binding Path=RefreshRacesCommand}" OnlyShowConfigured="True" ShowRefresh="True"/>
             </GroupBox>
             <Grid Grid.Row="2">
                 <Grid.ColumnDefinitions>
@@ -56,7 +56,7 @@
                 </Grid.RowDefinitions>
                 <ToggleButton Grid.Column="0" HorizontalAlignment="Left" VerticalAlignment="Top" Width="20" Content="{Binding Path=RaceConfigurationToggleButtonContent}" IsChecked="{Binding Path=ShowRaceConfiguration}"/>
                 <Label Grid.Column="1" Visibility="{Binding Path=ShowRaceConfiguration, Converter={StaticResource ResourceKey=InvertedBoolVisibilityConverter}}">Configure race settings</Label>
-                <GroupBox Grid.Column="1" Grid.RowSpan="2" Visibility="{Binding Path=ShowRaceConfiguration, Converter={StaticResource ResourceKey=BoolVisibilityConverter}}" Header="Configure race settings" IsEnabled="{Binding Path=Running, Converter={StaticResource ResourceKey=BoolInverterConverter}}">
+                <GroupBox Grid.Column="1" Grid.RowSpan="2" Visibility="{Binding Path=ShowRaceConfiguration, Converter={StaticResource ResourceKey=BoolVisibilityConverter}}" Header="Configure race settings">
                     <StackPanel Orientation="Vertical">
                         <Label>select race to configure</Label>
                         <Grid>
@@ -65,7 +65,7 @@
                                 <ColumnDefinition Width="Auto"/>
                                 <ColumnDefinition Width="Auto"/>
                             </Grid.ColumnDefinitions>
-                            <ComboBox ItemsSource="{Binding Path=Races}" SelectedValue="{Binding Path=SelectedRace}"/>
+                            <ComboBox ItemsSource="{Binding Path=NonVanillaRaces}" SelectedValue="{Binding Path=SelectedRace}"/>
                             <Button Grid.Column="1" Command="{Binding Path=SaveRaceSettingsCommand}">Save</Button>
                             <Button Grid.Column="2" Command="{Binding Path=LoadRaceSettingsCommand}" Visibility="Collapsed">Load</Button>
                         </Grid>
@@ -106,11 +106,13 @@
                             </DataGrid>
                         </DockPanel>
                         <Label>additional races</Label>
-                        <local:RaceList Height="150" ItemsSource="{Binding Path=AdditionalRaces}" SelectedItems="{Binding Path=SelectedRace.AdditionalRaces}" OnlyShowSelected="True"/>
+                        <local:RaceList Height="100" ItemsSource="{Binding Path=AdditionalRaces}" SelectedItems="{Binding Path=SelectedRace.AdditionalRaces}" OnlyShowSelected="True"/>
+                        <Label>compatible armor races</Label>
+                        <local:RaceList Height="100" ItemsSource="{Binding Path=VanillaRaces}" SelectedItems="{Binding Path=SelectedRace.CompatibleArmorRaces}" OnlyShowSelected="True"/>
                     </StackPanel>
                 </GroupBox>
             </Grid>
-            <GroupBox Grid.Row="3" Header="Output" IsEnabled="{Binding Path=Running, Converter={StaticResource ResourceKey=BoolInverterConverter}}">
+            <GroupBox Grid.Row="3" Header="Output">
                 <StackPanel Orientation="Vertical">
                     <DockPanel LastChildFill="True">
                         <Label DockPanel.Dock="Left">Plugin Name</Label>
@@ -129,14 +131,15 @@
                             <TextBox Text="{Binding Path=MaxNewRecords, UpdateSourceTrigger=PropertyChanged}" IsEnabled="{Binding Path=FlagESL}"/>
                         </Border>
                     </UniformGrid>
-                    <Button Height="50" Command="{Binding Path=PatchCommand}">Patch</Button>
+                    <CheckBox IsChecked="{Binding Path=SkipErrors}">skip errors (if possible)</CheckBox>
+                    <Button Height="30" Command="{Binding Path=PatchCommand}">Patch</Button>
                 </StackPanel>
             </GroupBox>
         </Grid>
         <DockPanel LastChildFill="True">
             <DockPanel DockPanel.Dock="Bottom" LastChildFill="True">
                 <Button DockPanel.Dock="Right" Command="{Binding Path=AboutCommand}">About</Button>
-                <StackPanel Orientation="Horizontal" IsEnabled="{Binding Path=Running, Converter={StaticResource ResourceKey=BoolInverterConverter}}">
+                <StackPanel Orientation="Horizontal">
                     <ComboBox ItemsSource="{Binding Path=ConsoleLevelItems}" SelectedValue="{Binding Path=SelectedConsoleLevel}" />
                     <Button Command="{Binding Path=SaveConsoleToFileCommand}">Save to File</Button>
                 </StackPanel>

@@ -27,5 +27,6 @@
       "Value": "[Draenei]\\$1"
     }
   ],
-  "AdditionalRaces": [ "aaDraiVampire" ]
+  "AdditionalRaces": [ "aaDraiVampire" ],
+  "CompatibleArmorRaces": [ "DefaultRace", "NordRace" ]
 }

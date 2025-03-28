@@ -4,6 +4,7 @@ using Mutagen.Bethesda.Environments;
 using Mutagen.Bethesda.FormKeys.SkyrimSE;
 using Mutagen.Bethesda.Plugins;
 using Mutagen.Bethesda.Skyrim;
+using System;
 using System.Text.RegularExpressions;
 
 namespace SSE.CRA.BL
@@ -37,17 +38,21 @@ namespace SSE.CRA.BL
         /// <returns></returns>
         public CustomRacesResult GetRaces()
         {
-            HashSet<string> res = [];
-            int vanilla = 0;
+            HashSet<string> nonVanilla = [];
+            HashSet<string> vanilla = [];
             foreach (var raceGetter in _environment.LoadOrder.PriorityOrder.OnlyEnabled().Race().WinningOverrides())
             {
                 // skip if no EditorID (?!)
                 if (raceGetter.EditorID is null) continue;
                 // count vanilla races / collect non-vanilla
-                if(raceGetter.FormKey.ModKey == Skyrim.ModKey || raceGetter.FormKey.ModKey == Dawnguard.ModKey || raceGetter.FormKey.ModKey == Dragonborn.ModKey) vanilla++;
-                else res.Add(raceGetter.EditorID);
+                if(raceGetter.FormKey.ModKey == Skyrim.ModKey || raceGetter.FormKey.ModKey == Dawnguard.ModKey || raceGetter.FormKey.ModKey == Dragonborn.ModKey) vanilla.Add(raceGetter.EditorID);
+                else nonVanilla.Add(raceGetter.EditorID);
             }
-            return new(res, vanilla);
+            return new(nonVanilla, vanilla);
+        }
+        public IEnumerable<FormKey> GetRaceFormKeys(IEnumerable<string> editorIDs)
+        {
+            return editorIDs.Select(id => GetRace(id).FormKey).ToArray();
         }
         /// <summary>
         /// Removes ArmorRace from race and its additional races, and updates Race and AdditionalRaces of naked skin
@@ -98,21 +103,38 @@ namespace SSE.CRA.BL
             {
                 if (processingInfo.IsCancellationRequested) break;
                 // check if should ignore based on EditorID of armor
-                if (processingInfo.GenSettings.IgnoreEditorIDs.Contains(armorGetter.EditorID!)) continue;
+                if (armorGetter.EditorID is null || processingInfo.GenSettings.IgnoreEditorIDs.Contains(armorGetter.EditorID)) continue;
                 // check if armor is wearable or something weird instead
                 if (!CheckIfWearableArmor(armorGetter)) continue;
                 ArmorInfo? armorInfo = null;
                 foreach (var arm in armorGetter.Armature)
                 {
-                    ArmorAddonInfo? armorAddonInfo = null;
                     if (processingInfo.IsCancellationRequested) break;
+                    IArmorAddonGetter aa;
+                    try
+                    {
+                        aa = arm.Resolve(_environment.LinkCache);
+                    }
+                    catch (Exception ex)
+                    {
+                        if (processingInfo.SkipErrors)
+                        {
+                            processingInfo.Progress?.Report(new ProgressInfo(ProgressInfoTypes.Error, $"skipped {arm.FormKey}: {ex}"));
+                            result.ErrorCount++;
+                            continue;
+                        }
+                        else
+                        {
+                            throw;
+                        }
+                    }
+                    if (!CheckIgnoreModelPath(processingInfo, aa)) continue;
+                    ArmorAddonInfo? armorAddonInfo = null;
                     foreach (var raceInfo in processingInfo.Races)
                     {
                         if (processingInfo.IsCancellationRequested) break;
-                        IArmorAddonGetter aa = arm.Resolve(_environment.LinkCache);
-                        // check if ArmorAddon is for DefaultRace or should skip this one
-                        if (aa.Race.FormKey != Skyrim.Race.DefaultRace.FormKey && !aa.AdditionalRaces.Any(ar => ar.FormKey == Skyrim.Race.DefaultRace.FormKey)) continue;
-
+                        // check if ArmorAddon is for compatible race or should skip this one
+                        if (!raceInfo.CheckIfCompatibleArmorRace(aa)) continue;
                         // armor will be processed in some way
                         if (armorInfo is null)
                         {
@@ -193,6 +215,22 @@ namespace SSE.CRA.BL
         {
             return armorGetter.EditorID is not null && !armorGetter.EditorID.StartsWith("SkinNaked");
         }
+        private bool CheckIgnoreModelPath(ArmorProcessingInfo processingInfo, IArmorAddonGetter aa)
+        {
+            if (aa.WorldModel is null) return false;
+            bool res = false;
+            if(aa.WorldModel.Male is not null)
+            {
+                if (processingInfo.IgnoreModelPathRegexes.Any(r => r.IsMatch(aa.WorldModel.Male.File.GivenPath))) return false;
+                res = true;
+            }
+            if (aa.WorldModel.Female is not null)
+            {
+                if (processingInfo.IgnoreModelPathRegexes.Any(r => r.IsMatch(aa.WorldModel.Female.File.GivenPath))) return false;
+                res = true;
+            }
+            return res;
+        }
         #endregion
 
         public class ArmorProcessingInfo
@@ -203,8 +241,9 @@ namespace SSE.CRA.BL
             public readonly bool FlagESL;
             public readonly int MaxMasters;
             public readonly int MaxNewRecords;
+            public readonly bool SkipErrors;
             public readonly GeneralSettings GenSettings;
-            public readonly IEnumerable<Regex> NonWearableArmorRegexes;
+            public readonly IEnumerable<Regex> IgnoreModelPathRegexes;
             private readonly List<OutputMod> Outputs = [];
             private readonly HashSet<string> _missingModelPaths = [];
             #endregion
@@ -219,15 +258,16 @@ namespace SSE.CRA.BL
             #endregion
 
             #region ctors
-            public ArmorProcessingInfo(string gameDataPath, string outputName, bool flagESL, int maxMasters, int maxNewRecords, GeneralSettings genSettings, IEnumerable<Regex> nonWearableArmorRegexes)
+            public ArmorProcessingInfo(string gameDataPath, string outputName, bool flagESL, int maxMasters, int maxNewRecords, bool skipErrors, GeneralSettings genSettings)
             {
                 GameDataPath = gameDataPath;
                 OutputName = outputName;
                 FlagESL = flagESL;
                 MaxMasters = maxMasters;
                 MaxNewRecords = maxNewRecords;
+                SkipErrors = skipErrors;
                 GenSettings = genSettings;
-                NonWearableArmorRegexes = nonWearableArmorRegexes;
+                IgnoreModelPathRegexes = genSettings.IgnoreModelPathRegexes.Select(r => new Regex(r, RegexOptions.IgnoreCase)).ToArray();
             }
             #endregion
 
@@ -313,10 +353,11 @@ namespace SSE.CRA.BL
             public readonly bool ProcessFemale;
             public readonly IEnumerable<ModelPathRegexInfo> ModelPathReplacers;
             public readonly IEnumerable<RaceID> AdditionalRaces;
+            public readonly IEnumerable<FormKey> CompatibleArmorRaces;
             #endregion
 
             #region ctors
-            public ArmorRaceProcessingInfo(RaceID race, bool customHead, bool customBody, bool customHands, bool customFeet, bool procMale, bool procFemale, IEnumerable<ModelPathRegexInfo> modelPathReplacers, IEnumerable<RaceID> additionalRaces)
+            public ArmorRaceProcessingInfo(RaceID race, bool customHead, bool customBody, bool customHands, bool customFeet, bool procMale, bool procFemale, IEnumerable<ModelPathRegexInfo> modelPathReplacers, IEnumerable<RaceID> additionalRaces, IEnumerable<FormKey> compatibleArmorRaces)
             {
                 Race = race;
                 CustomHead = customHead;
@@ -327,10 +368,15 @@ namespace SSE.CRA.BL
                 ProcessFemale = procFemale;
                 ModelPathReplacers = modelPathReplacers;
                 AdditionalRaces = additionalRaces;
+                CompatibleArmorRaces = compatibleArmorRaces;
             }
             #endregion
 
             #region methods
+            public bool CheckIfCompatibleArmorRace(IArmorAddonGetter aa)
+            {
+                return CompatibleArmorRaces.Any(cr => aa.Race.FormKey == cr || aa.AdditionalRaces.Contains(cr));
+            }
             public bool CheckIfNeedsCustomArmature(IArmorAddonGetter armature, out ModelPathRegexInfo? maleRegex, out ModelPathRegexInfo? femaleRegex)
             {
                 maleRegex = null;
@@ -348,11 +394,13 @@ namespace SSE.CRA.BL
                 {
                     return false;
                 }
-                if (ProcessMale && armature.WorldModel.Male is not null)
+                // process if male has model, and either should process male or female is using male model
+                if (armature.WorldModel.Male is not null && (ProcessMale || (ProcessFemale && armature.WorldModel.Female is null)))
                 {
                     maleRegex = ModelPathReplacers.FirstOrDefault(mpr => mpr.Regex.IsMatch(armature.WorldModel.Male.File.GivenPath));
                 }
-                if (ProcessFemale && armature.WorldModel.Female is not null)
+                // process if female has model, and either should process female or male is using female model
+                if (armature.WorldModel.Female is not null && (ProcessFemale || (ProcessMale && armature.WorldModel.Male is null)))
                 {
                     femaleRegex = ModelPathReplacers.FirstOrDefault(mpr => mpr.Regex.IsMatch(armature.WorldModel.Female.File.GivenPath));
                 }
@@ -379,11 +427,11 @@ namespace SSE.CRA.BL
             #endregion
         }
 
-        public readonly struct CustomRacesResult(IEnumerable<string> raceEditorIDs, int vanillaRacesCount)
+        public readonly struct CustomRacesResult(IEnumerable<string> nonVanillaEditorIDs, IEnumerable<string> vanillaEditorIDs)
         {
             #region fields
-            public readonly IEnumerable<string> RaceEditorIDs = raceEditorIDs;
-            public readonly int VanillaRacesCount = vanillaRacesCount;
+            public readonly IEnumerable<string> NonVanillaRaceEditorIDs = nonVanillaEditorIDs;
+            public readonly IEnumerable<string> VanillaRaceEditorIDs = vanillaEditorIDs;
             #endregion
         }
 

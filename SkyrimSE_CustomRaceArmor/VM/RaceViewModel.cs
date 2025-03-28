@@ -7,11 +7,11 @@ namespace SSE.CRA.VM
     {
         #region fields
         public readonly string EditorID;
-        private bool _toBeProcessed;
         private RaceSettings? _settings;
         private readonly ObservableCollection<ReplacerRegexViewModel> _replacerRegexes = [];
         private ReplacerRegexViewModel? _selectedReplacerRegex;
         private IEnumerable<RaceViewModel> _additionalRaces = [];
+        private IEnumerable<RaceViewModel> _compatibleArmorRaces;
         #endregion
 
         #region properties
@@ -133,6 +133,17 @@ namespace SSE.CRA.VM
                 RaisePropertyChanged();
             }
         }
+        public IEnumerable<RaceViewModel> CompatibleArmorRaces
+        {
+            get => _compatibleArmorRaces;
+            set
+            {
+                Settings ??= CreateSettings();
+                _compatibleArmorRaces = value;
+                Settings.CompatibleArmorRaces = [.. value.Select(ar => ar.EditorID)];
+                RaisePropertyChanged();
+            }
+        }
         public DelegateCommandBase MoveReplacerRegexUpCommand { get; private set; }
         public DelegateCommandBase MoveReplacerRegexDownCommand { get; private set; }
         #endregion
@@ -142,7 +153,7 @@ namespace SSE.CRA.VM
         #endregion
 
         #region ctors
-        public RaceViewModel(string editorID)
+        public RaceViewModel(string editorID, IEnumerable<RaceViewModel> vanilla)
         {
             EditorID = editorID;
             MoveReplacerRegexUpCommand = new DelegateCommand(MoveReplacerRegexUp, CanMoveReplacerRegexUp);
@@ -150,11 +161,13 @@ namespace SSE.CRA.VM
             var rr = new ReplacerRegexViewModel() { SearchRegex = "(.+)", ReplaceString = "Patched\\$1" };
             _replacerRegexes.Add(rr);
             _replacerRegexes.CollectionChanged += ReplacerRegexes_CollectionChanged;
+            var defRace = vanilla.FirstOrDefault(r => r.EditorID == "DefaultRace");
+            _compatibleArmorRaces = defRace is null ? [] : [defRace];
         }
         #endregion
 
         #region methods
-        public bool TryLoadRaceSettings(IEnumerable<IRaceSettingsAL> raceSettingsALs, IEnumerable<RaceViewModel> allRaces)
+        public bool TryLoadRaceSettings(IEnumerable<IRaceSettingsAL> raceSettingsALs, IEnumerable<RaceViewModel> nonVanillaRaces, IEnumerable<RaceViewModel> vanillaRaces)
         {
             IRaceSettingsAL? raceSettingsAL = null;
             foreach (var al in raceSettingsALs)
@@ -178,13 +191,21 @@ namespace SSE.CRA.VM
             _replacerRegexes.CollectionChanged += ReplacerRegexes_CollectionChanged;
             ReplacerRegexes_CollectionChanged(_replacerRegexes, new System.Collections.Specialized.NotifyCollectionChangedEventArgs(System.Collections.Specialized.NotifyCollectionChangedAction.Reset));
             List<RaceViewModel> addRaces = [];
-            foreach(var addRace in Settings.AdditionalRaces)
+            foreach (var addRace in Settings.AdditionalRaces)
             {
-                RaceViewModel? vm = allRaces.FirstOrDefault(r => r.EditorID == addRace);
-                if(vm is not null) addRaces.Add(vm);
+                RaceViewModel? vm = nonVanillaRaces.FirstOrDefault(r => r.EditorID == addRace);
+                if (vm is not null) addRaces.Add(vm);
             }
             _additionalRaces = addRaces;
             RaisePropertyChanged(nameof(AdditionalRaces));
+            List<RaceViewModel> compArmorRaces = [];
+            foreach (var compArmorRace in Settings.CompatibleArmorRaces)
+            {
+                RaceViewModel? vm = vanillaRaces.FirstOrDefault(r => r.EditorID == compArmorRace);
+                if (vm is not null) compArmorRaces.Add(vm);
+            }
+            _compatibleArmorRaces = compArmorRaces;
+            RaisePropertyChanged(nameof(CompatibleArmorRaces));
             return true;
         }
         public void SaveRaceSettings(IRaceSettingsAL raceSettingsAL)
@@ -222,7 +243,8 @@ namespace SSE.CRA.VM
                 ProcessMale = ProcessMale,
                 ProcessFemale = ProcessFemale,
                 RegexReplacers = [.. ReplacerRegexes.Select(rr => new KeyValuePair<string, string>(rr.SearchRegex, rr.ReplaceString))],
-                AdditionalRaces = [.. AdditionalRaces.Select(ar => ar.EditorID)]
+                AdditionalRaces = [.. AdditionalRaces.Select(ar => ar.EditorID)],
+                CompatibleArmorRaces = [.. CompatibleArmorRaces.Select(ar => ar.EditorID)]
             };
         }
         private void UpdateEnabled()

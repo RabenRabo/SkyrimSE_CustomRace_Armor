@@ -168,12 +168,13 @@ namespace SSE.CRA.UI
         private static void SelectedItems_ValueChanged(DependencyObject sender, DependencyPropertyChangedEventArgs e)
         {
             var list = (RaceList)sender;
-            if (list._viewModels is null) return;
+            if (list._allViewModels is null) return;
             var selected = (IEnumerable<RaceViewModel>)e.NewValue;
-            foreach (var item in list._viewModels)
+            foreach (var item in list._allViewModels)
             {
                 item.ChangeIsChecked(selected.Contains(item.Model));
             }
+            list.FilterViewModels();
         }
         private static void OnlyShowConfigured_ValueChanged(DependencyObject sender, DependencyPropertyChangedEventArgs e)
         {
